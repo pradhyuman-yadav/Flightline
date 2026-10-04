@@ -23,6 +23,10 @@ namespace Flightline.EditorTools
             Write(Paint(1024, (p, px) => Mark(p, px, 0.5f, true)), Dir + "/icon_adaptive_fg.png");
             Write(Paint(1024, (p, px) => Composite(p, px, true)), Dir + "/icon_legacy.png");
             Write(Paint(512, (p, px) => Composite(p, px, false)), Dir + "/Store/play_icon_512.png");
+            // iOS: square, no alpha channel (App Store rejects icons with one); the system rounds the corners
+            var ios = Paint(1024, (p, px) => Composite(p, px, false));
+            var rgb = new Texture2D(1024, 1024, TextureFormat.RGB24, false); rgb.SetPixels(ios.GetPixels()); rgb.Apply();
+            UnityEngine.Object.DestroyImmediate(ios); Write(rgb, Dir + "/icon_ios_1024.png");
             var mark = Paint(512, (p, px) => Mark(p, px, 0.8f, true));
             Write(RenderUI(1200, 760, Fids, root => SplashLogo(root, mark), true), Dir + "/splash_logo.png");
             var bigMark = Paint(768, (p, px) => Mark(p, px, 0.85f, true));
@@ -196,14 +200,37 @@ namespace Flightline.EditorTools
         // ---------------------------------------------------------------- import + apply
         static void ConfigureImporters()
         {
-            foreach (var f in new[] { "icon_adaptive_bg.png", "icon_adaptive_fg.png", "icon_legacy.png" })
+            foreach (var f in new[] { "icon_adaptive_bg.png", "icon_adaptive_fg.png", "icon_legacy.png", "icon_ios_1024.png" })
             {
                 var ti = (TextureImporter)AssetImporter.GetAtPath(Dir + "/" + f); if (ti == null) continue;
                 ti.textureType = TextureImporterType.Default; ti.alphaIsTransparency = true; ti.mipmapEnabled = false; ti.npotScale = TextureImporterNPOTScale.None;
-                ti.textureCompression = TextureImporterCompression.Uncompressed; ti.SaveAndReimport();
+                ti.textureCompression = TextureImporterCompression.Uncompressed;
+                if (f == "icon_ios_1024.png") { ti.alphaSource = TextureImporterAlphaSource.None; ti.alphaIsTransparency = false; }
+                ti.SaveAndReimport();
             }
             var si = (TextureImporter)AssetImporter.GetAtPath(Dir + "/splash_logo.png");
             if (si != null) { si.textureType = TextureImporterType.Sprite; si.spriteImportMode = SpriteImportMode.Single; si.mipmapEnabled = false; si.alphaIsTransparency = true; si.textureCompression = TextureImporterCompression.Uncompressed; si.SaveAndReimport(); }
+        }
+
+        public static void ApplyIos()
+        {
+            var icon = AssetDatabase.LoadAssetAtPath<Texture2D>(Dir + "/icon_ios_1024.png");
+            if (icon == null) { Generate(); icon = AssetDatabase.LoadAssetAtPath<Texture2D>(Dir + "/icon_ios_1024.png"); }
+            var t = UnityEditor.Build.NamedBuildTarget.iOS;
+            foreach (var kind in PlayerSettings.GetSupportedIconKinds(t))
+            {
+                var icons = PlayerSettings.GetPlatformIcons(t, kind);
+                foreach (var ic in icons) ic.SetTexture(icon);
+                PlayerSettings.SetPlatformIcons(t, kind, icons);
+            }
+            // launch screen: board colour with the logo, so it hands over to the Unity splash without a flash
+            var logo = AssetDatabase.LoadAssetAtPath<Texture2D>(Dir + "/splash_logo.png");
+            var so = new SerializedObject(Unsupported.GetSerializedAssetInterfaceSingleton("PlayerSettings"));
+            so.FindProperty("iOSLaunchScreenType").intValue = 1; // ImageAndBackgroundRelative
+            so.FindProperty("iOSLaunchScreenPortrait").objectReferenceValue = logo;
+            so.FindProperty("iOSLaunchScreenBackgroundColor").colorValue = Fids;
+            so.FindProperty("iOSLaunchScreenFillPct").floatValue = 70f;
+            so.ApplyModifiedPropertiesWithoutUndo();
         }
 
         public static void ApplyToPlayerSettings()

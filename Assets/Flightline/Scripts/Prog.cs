@@ -139,16 +139,21 @@ namespace Flightline
             A("elite",   "ELITE STATUS",     "Fly 100,000 mi in total.",                 1000,(r, s) => s.totalMiles >= 100000),
         };
 
+        // Shared empty result: callers only iterate / read Count, never store or mutate it.
+        static readonly List<AchDef> NoAchs = new List<AchDef>();
+        static readonly RunStats EmptyRun = new RunStats();
+
+        // Allocation-free unless something unlocks (called every 0.5 s mid-flight).
         public static List<AchDef> Check(RunStats r)
         {
-            var d = Save.D; var res = new List<AchDef>();
-            if (r == null) r = new RunStats();
+            var d = Save.D; List<AchDef> res = null;
+            if (r == null) r = EmptyRun;
             foreach (var a in Achs)
             {
                 if (d.ach.Contains(a.id) || !a.test(r, d)) continue;
-                d.ach.Add(a.id); d.coins += a.reward; res.Add(a);
+                d.ach.Add(a.id); d.coins += a.reward; (res ??= new List<AchDef>()).Add(a);
             }
-            return res;
+            return res ?? NoAchs;
         }
     }
 }

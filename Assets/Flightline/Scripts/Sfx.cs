@@ -6,20 +6,26 @@ namespace Flightline
     public class Sfx : MonoBehaviour
     {
         public static Sfx I;
-        AudioSource src, wind;
+        AudioSource wind;
+        // Small voice pool: each one-shot gets its own source so a pitch change on one sound
+        // never retunes sounds already playing, and polyphony is bounded (oldest voice is stolen).
+        const int Voices = 8;
+        readonly AudioSource[] voices = new AudioSource[Voices];
+        readonly float[] voiceStart = new float[Voices];
+        static readonly float[] PowerNotes = { 523, 659, 784, 1046 };
         AudioClip coin, fuel, power, whoosh, crash, click, chime, sputter, smash;
         const int SR = 44100;
 
         public void Init()
         {
             I = this;
-            src = gameObject.AddComponent<AudioSource>(); src.playOnAwake = false;
+            for (int i = 0; i < Voices; i++) { var v = gameObject.AddComponent<AudioSource>(); v.playOnAwake = false; voices[i] = v; }
             wind = gameObject.AddComponent<AudioSource>(); wind.playOnAwake = false; wind.loop = true; wind.volume = 0f;
             if (FindAnyObjectByType<AudioListener>() == null) gameObject.AddComponent<AudioListener>();
 
             coin = Make("coin", 0.16f, t => (t < 0.05f ? Tone(t, 988) : Tone(t, 1319)) * Env(t, 0.16f, 0.003f) * 0.22f);
             click = Make("click", 0.04f, t => Mathf.Sin(2 * Mathf.PI * 1700 * t) * Env(t, 0.04f, 0.001f) * 0.18f);
-            power = Make("power", 0.34f, t => { int n = Mathf.Min(3, (int)(t / 0.07f)); float[] f = { 523, 659, 784, 1046 }; return Tone(t, f[n]) * Env(t, 0.34f, 0.004f) * 0.2f; });
+            power = Make("power", 0.34f, t => { int n = Mathf.Min(3, (int)(t / 0.07f)); return Tone(t, PowerNotes[n]) * Env(t, 0.34f, 0.004f) * 0.2f; });
             chime = Make("chime", 0.8f, t => (Mathf.Sin(2 * Mathf.PI * 784 * t) * Env(t, 0.8f, 0.004f) + (t > 0.12f ? Mathf.Sin(2 * Mathf.PI * 1175 * t) * Env(t - 0.12f, 0.68f, 0.004f) : 0f)) * 0.18f);
             fuel = Sweep("fuel", 0.24f, 320, 900, 0.2f);
             whoosh = Noise("whoosh", 0.38f, t => Mathf.Lerp(0.02f, 0.25f, Mathf.Sin(Mathf.PI * t / 0.38f)), t => Mathf.Sin(Mathf.PI * t / 0.38f) * 0.3f, 7);
@@ -72,7 +78,19 @@ namespace Flightline
         void Play(AudioClip c, float vol = 1f, float pitch = 1f)
         {
             if (!Save.D.sound || c == null) return;
-            src.pitch = pitch; src.PlayOneShot(c, vol);
+            float now = Time.unscaledTime; int free = -1, oldest = 0;
+            for (int i = 0; i < Voices; i++)
+            {
+                var v = voices[i];
+                if (!v.isPlaying) { if (free < 0) free = i; continue; }
+                // Same clip retriggered within ~25 ms (e.g. several coins in one frame): skip, stacking in phase only clips.
+                if (v.clip == c && now - voiceStart[i] < 0.025f) return;
+                if (voiceStart[i] < voiceStart[oldest]) oldest = i;
+            }
+            int pick = free >= 0 ? free : oldest;
+            var s = voices[pick];
+            s.Stop(); s.clip = c; s.pitch = pitch; s.volume = vol; s.Play();
+            voiceStart[pick] = now;
         }
 
         public static void Click() { if (I) I.Play(I.click, 0.8f); }

@@ -54,7 +54,9 @@ namespace Flightline
         {
             var d = Save.D;
             if (d.missionVer < 2) { if (d.missions != null) foreach (var m in d.missions) if (m.done) m.claimed = true; d.missionVer = 2; } // older saves paid out on completion
-            if (d.missionDay == Today && d.missions != null && d.missions.Count == 3) return false;
+            bool valid = Valid(d.missions);
+            if (valid && d.missionDay == Today) return false;
+            if (valid && Rewound(d.missionDay)) return false; // clock moved back: keep current set, no fresh rewards
             d.missionDay = Today; d.rerollUsed = false; d.bonusClaimed = false;
             var rng = new System.Random(Hash(Today));
             d.missions = new List<Mission>
@@ -65,6 +67,25 @@ namespace Flightline
             d.missions.Add(Make(PickNew(rng), rng));
             Save.Write();
             return true;
+        }
+
+        static bool Valid(List<Mission> list)
+        {
+            if (list == null || list.Count != 3) return false;
+            foreach (var m in list)
+            {
+                if (m == null || m.type < 0 || m.type >= Text.Length) return false;
+                if ((MType)m.type == MType.ReachZone && (m.target < 0 || m.target >= Prog.Zones.Length)) return false;
+            }
+            return true;
+        }
+
+        // Saved mission day is later than today (device clock rewound). Ignored if absurdly far ahead so a once-bogus clock can recover.
+        static bool Rewound(string day)
+        {
+            if (string.IsNullOrEmpty(day) || !DateTime.TryParseExact(day, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var saved)) return false;
+            double ahead = (saved - DateTime.Today).TotalDays;
+            return ahead > 0 && ahead <= 30;
         }
 
         static MType PickNew(System.Random rng)
@@ -124,8 +145,9 @@ namespace Flightline
         // ---- claiming: rewards are collected by tapping, so finishing a mission pulls you back to the menu
         public static int Claim(int i)
         {
-            var d = Save.D; var m = d.missions[i];
-            if (!m.done || m.claimed) return 0;
+            var d = Save.D; if (d.missions == null || i < 0 || i >= d.missions.Count) return 0;
+            var m = d.missions[i];
+            if (m == null || !m.done || m.claimed) return 0;
             m.claimed = true; d.coins += m.reward; Save.Write();
             return m.reward;
         }
@@ -144,7 +166,7 @@ namespace Flightline
 
         public static int Claimable { get { int n = 0; foreach (var m in List) if (m.done && !m.claimed) n++; return n + (BonusReady ? 1 : 0); } }
 
-        public static bool CanSwap(int i) { var d = Save.D; return !d.rerollUsed && d.missions != null && i < d.missions.Count && !d.missions[i].done; }
+        public static bool CanSwap(int i) { var d = Save.D; return !d.rerollUsed && d.missions != null && i >= 0 && i < d.missions.Count && !d.missions[i].done; }
 
         public static void Swap(int i)
         {

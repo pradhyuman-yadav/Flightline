@@ -21,8 +21,9 @@ namespace Flightline
             var font = Resources.Load<Font>("FlightlineFonts/" + file);
             fa = font != null
                 ? TMP_FontAsset.CreateFontAsset(font, 72, 8, GlyphRenderMode.SDFAA, 1024, 1024, AtlasPopulationMode.Dynamic, true)
-                : TMP_Settings.defaultFontAsset;
-            if (fa != null) fa.name = file;
+                : null;
+            if (fa != null) fa.name = file; // only rename assets we created, never the shared TMP default
+            else { Debug.LogWarning("Flightline: font '" + file + "' unavailable, using TMP default"); fa = TMP_Settings.defaultFontAsset; }
             Map[file] = fa;
             return fa;
         }
@@ -34,6 +35,16 @@ namespace Flightline
         public const float RSm = 6f;   // radius-sm 2px
         public static float PillM(float h) => 62f / h;
         public const float RPanel = 1.2f; // ~10px corners for panels: softer than signage-square
+
+        // One tap = one action: swallows a second click (same or another button) fired within a short window,
+        // e.g. a double-tap on PLAY AGAIN, or a tap on the outgoing screen while a slide is still running.
+        static float lastClick = -1f;
+        public static bool ClickGate(float gap = 0.35f)
+        {
+            float now = Time.unscaledTime;
+            if (now >= lastClick && now - lastClick < gap) return false; // now < lastClick: new play session (domain reload off)
+            lastClick = now; return true;
+        }
 
         public static float Back(float x, float s = 1.4f) { x = Mathf.Clamp01(x) - 1f; return 1f + (s + 1f) * x * x * x + s * x * x; }
         public static float OutCubic(float x) { x = 1f - Mathf.Clamp01(x); return 1f - x * x * x; }
@@ -192,7 +203,7 @@ namespace Flightline
             var t = Text(img.transform, label, TS.Button, Tok.InkInverse); LE(t, -1, -1, 1);
             if (right) Pic(img.transform, Art.Picto("arrowR"), 32);
             var b = img.gameObject.AddComponent<Button>(); b.transition = Selectable.Transition.None;
-            b.onClick.AddListener(() => { Sfx.Click(); onClick?.Invoke(); });
+            b.onClick.AddListener(() => { if (!ClickGate()) return; Sfx.Click(); onClick?.Invoke(); });
             var u = Img(img.transform, "Underline", Tok.Signal); var ur = u.rectTransform;
             ur.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
             ur.anchorMin = new Vector2(0, 0); ur.anchorMax = new Vector2(1, 0); ur.pivot = new Vector2(0.5f, 0); ur.sizeDelta = new Vector2(-24, 3); ur.anchoredPosition = new Vector2(0, 6);
@@ -246,7 +257,7 @@ namespace Flightline
             b.label = UI.Text(row, text, TS.Button, Tok.OnSignal, TextAlignmentOptions.Center);
             b.button = r.gameObject.AddComponent<Button>(); b.button.transition = Selectable.Transition.None; b.button.targetGraphic = b.face;
             var nav = b.button.navigation; nav.mode = Navigation.Mode.None; b.button.navigation = nav;
-            b.button.onClick.AddListener(() => { Sfx.Click(); b.onClick?.Invoke(); });
+            b.button.onClick.AddListener(() => { if (!UI.ClickGate()) return; Sfx.Click(); b.onClick?.Invoke(); });
             b.Refresh();
             return b;
         }
@@ -326,7 +337,7 @@ namespace Flightline
             if (delay > 0) yield return new WaitForSecondsRealtime(delay);
             float t = 0;
             while (t < 0.03f) { t += Time.unscaledDeltaTime; tiles[i].localScale = new Vector3(1, Mathf.Max(0, 1 - t / 0.03f), 1); yield return null; }
-            chars[i].text = c.ToString(); t = 0;
+            chars[i].text = cur[i].ToString(); t = 0; // latest target, not the (possibly stale) char this flip started with
             while (t < 0.03f) { t += Time.unscaledDeltaTime; tiles[i].localScale = new Vector3(1, Mathf.Min(1, t / 0.03f), 1); yield return null; }
             tiles[i].localScale = Vector3.one;
         }
@@ -337,7 +348,7 @@ namespace Flightline
     // HUD gauge: label + status word + pill track.
     public class Gauge
     {
-        public RectTransform root; TextMeshProUGUI word; Image fill; Themed wordT, fillT; TextMeshProUGUI label; float shown = -1f;
+        public RectTransform root; TextMeshProUGUI word; Image fill; Themed wordT, fillT; TextMeshProUGUI label; float shown = -1f, appliedFill = -1f; string appliedWord; bool fillOn = true, wordOn = true;
 
         public static Gauge Make(Transform parent, string label)
         {
@@ -355,9 +366,10 @@ namespace Flightline
         {
             v = Mathf.Clamp01(v);
             shown = shown < 0f || !root.gameObject.activeInHierarchy ? v : Mathf.Lerp(shown, v, 1f - Mathf.Exp(-10f * Time.unscaledDeltaTime));
-            fill.rectTransform.anchorMax = new Vector2(shown, 1);
-            fill.enabled = shown > 0.005f;
-            word.text = w; word.enabled = showWord;
+            if (appliedFill < 0f || Mathf.Abs(shown - appliedFill) > 0.001f || (shown != appliedFill && (shown == 0f || shown == 1f))) { appliedFill = shown; fill.rectTransform.anchorMax = new Vector2(shown, 1); }
+            bool fOn = shown > 0.005f; if (fOn != fillOn) { fillOn = fOn; fill.enabled = fOn; }
+            if (!ReferenceEquals(w, appliedWord) && w != appliedWord) { appliedWord = w; word.text = w; }
+            if (showWord != wordOn) { wordOn = showWord; word.enabled = showWord; }
             if (wordT.tok != tok) { wordT.Set(tok); fillT.Set(tok); }
         }
         public void SetLabel(string s) => label.text = s;
@@ -366,10 +378,10 @@ namespace Flightline
     // Floating chip near the plane: "CLOSE CALL +50".
     public class PopChip : MonoBehaviour
     {
-        public TextMeshProUGUI text; public CanvasGroup cg; public RectTransform rt; float t, swayDir; Vector2 start;
+        public TextMeshProUGUI text; public CanvasGroup cg; public RectTransform rt; float t, swayDir; Vector2 start; Themed textT;
         public void Show(Vector2 pos, string s, Tok tok)
         {
-            text.text = s; text.GetComponent<Themed>().Set(tok); start = pos; rt.anchoredPosition = pos; t = 0;
+            if (textT == null) textT = text.GetComponent<Themed>(); text.text = s; textT.Set(tok); start = pos; rt.anchoredPosition = pos; t = 0;
             swayDir = UnityEngine.Random.value < 0.5f ? -1f : 1f; rt.localScale = Vector3.one * 0.4f; gameObject.SetActive(true);
         }
         void Update()
@@ -388,12 +400,20 @@ namespace Flightline
     // Scale spring for HUD numbers: Punch() kicks it, it settles back to 1 with a little wobble.
     public class Springy : MonoBehaviour
     {
-        float s = 1f, v;
-        public void Punch(float amount) { v += amount; }
+        float s = 1f, v; bool rest;
+        public void Punch(float amount) { v += amount; rest = false; }
         void Update()
         {
+            if (rest)
+            {
+                // At rest: only re-assert scale if something else moved it (reading doesn't dirty the canvas).
+                var ls = transform.localScale;
+                if (ls.x != 1f || ls.y != 1f || ls.z != 1f) transform.localScale = Vector3.one;
+                return;
+            }
             float dt = Mathf.Min(Time.unscaledDeltaTime, 0.05f);
             v += (-280f * (s - 1f) - 13f * v) * dt; s += v * dt;
+            if (Mathf.Abs(s - 1f) < 0.0005f && Mathf.Abs(v) < 0.005f) { s = 1f; v = 0f; rest = true; }
             transform.localScale = new Vector3(s, s, 1);
         }
     }

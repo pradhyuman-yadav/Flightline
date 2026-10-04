@@ -7,7 +7,9 @@
 # and distributed under MIT License.
 
 # Define macros (only works in top-level gitattributes files)
-[attr]lfs               filter=lfs diff=lfs merge=lfs -text
+# Binaries are stored directly (no Git LFS), so the repo works without git-lfs installed.
+# To move to LFS later: install git-lfs, restore "filter=lfs diff=lfs merge=lfs -text" here, then run git lfs migrate.
+[attr]lfs               binary
 [attr]unity-json        eol=lf linguist-language=json
 [attr]unity-yaml        merge=unityyamlmerge eol=lf linguist-language=yaml
 

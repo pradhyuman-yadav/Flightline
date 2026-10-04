@@ -128,7 +128,11 @@ namespace Flightline
             curChunk = "pickup";
             if (travel >= nextFuelAt) { PlaceSafe(Kind.Fuel, y0 + extent * 0.5f); nextFuelAt = travel + t.fuelEvery * Random.Range(0.85f, 1.15f); }
             if (travel >= nextPowerAt) { PlaceSafe((Kind)Random.Range((int)Kind.Shield, (int)Kind.Boost + 1), y0 + extent * 0.5f + 1f); nextPowerAt = travel + Random.Range(120f, 190f); }
-            nextRowAt += extent + Random.Range(t.gapMin, t.gapMax);
+            // Min reaction TIME between rows: untouched at speed <= 9, then the gap scales with speed and
+            // ramps to a floor of ~0.36 s of travel by speed 10.5 (steering settle ~0.2 s + reaction).
+            float gap = Random.Range(t.gapMin, t.gapMax) * Mathf.Max(1f, t.speed / 9f);
+            gap = Mathf.Max(gap, t.speed * 0.36f * Mathf.Clamp01((t.speed - 9f) / 1.5f));
+            nextRowAt += extent + gap;
         }
 
 #if UNITY_EDITOR
@@ -158,8 +162,10 @@ namespace Flightline
         void PityFuel()
         {
             if (fuel > 0.25f || travel - lastPity < 30f) return;
-            foreach (var e in ents) if (e.kind == Kind.Fuel) return;
-            nextFuelAt = Mathf.Min(nextFuelAt, travel); lastPity = travel;
+            foreach (var e in ents) if (e.kind == Kind.Fuel && e.t.position.y > PlaneY - 0.5f) return; // a canister already behind the plane doesn't count
+            // Spawn right at the top edge instead of waiting for the next chunk: a long chunk (gauntlet, zigzag) could delay it past the last of the fuel.
+            lastPity = travel;
+            string prev = curChunk; curChunk = "pity"; PlaceSafe(Kind.Fuel, SpawnY); curChunk = prev;
         }
 
         // ---------------------------------------------------------------- section library
@@ -199,7 +205,7 @@ namespace Flightline
                 C("driftwall", 4, 4, 4,  (y, t) => { float a = Wall(y, t.wallGap); return a + 1.6f + Drift(y + a + 1.6f, 2); }),
 
                 C("gauntlet",  5, 4, 5,  (y, t) => { float a = Zigzag(y, t, 3); return a + 1.4f + Cells(y + a + 1.4f, 1); }),
-                C("edgefield", 5, 5, 5,  (y, t) => { float a = Scatter(y, 5); Drone(RandX(0.8f), y + 1.2f, t.droneSpeed * 1.2f); return a; }),
+                C("edgefield", 5, 5, 5,  (y, t) => { float a = Scatter(y, 5); Drone(RandX(0.8f), y + a + 1.2f, t.droneSpeed * 1.2f); return a + 1.8f; }), // drone gets its own band above the scatter rows (LeavesGap ignores drones)
                 C("stormgust", 5, 2, 5,  (y, t) => Gust(y, t, true, 0.4f)),
                 C("wires",     5, 3, 5,  (y, t) => { float a = Wire(y); return a + 2.4f + Wire(y + a + 2.4f); }),
             };
@@ -235,6 +241,27 @@ namespace Flightline
                 }
                 if (md > bestD) { bestD = md; best = x; }
             }
+            if (bestD < 0.5f)
+            {
+                // All samples blocked or tight: take the centre of the widest free interval in this band.
+                spans.Clear();
+                foreach (var e in ents)
+                {
+                    if (!e.Hazard || Mathf.Abs(e.t.position.y - y) > 1.6f + VerticalReach(e)) continue;
+                    HazardSpan(e, true, out float lo, out float hi);
+                    if (hi > lo) spans.Add(new Vector2(lo, hi));
+                }
+                spans.Sort((a, b) => a.x.CompareTo(b.x));
+                float cursor = -PlayHalfW + 0.8f, end = PlayHalfW - 0.8f, wBest = -1f, xBest = best;
+                foreach (var sp in spans)
+                {
+                    float hiEdge = Mathf.Min(sp.x, end);
+                    if (hiEdge - cursor > wBest) { wBest = hiEdge - cursor; xBest = (cursor + hiEdge) * 0.5f; }
+                    cursor = Mathf.Max(cursor, sp.y);
+                }
+                if (end - cursor > wBest) { wBest = end - cursor; xBest = (cursor + end) * 0.5f; }
+                if (wBest * 0.5f > bestD) best = xBest;
+            }
             Spawn(k, best, y);
         }
 
@@ -253,7 +280,7 @@ namespace Flightline
                 if (hi > lo) spans.Add(new Vector2(lo - pad, hi + pad));
             }
             spans.Sort((a, b) => a.x.CompareTo(b.x));
-            float cursor = -PlayHalfW + 0.3f, end = PlayHalfW - 0.3f;
+            float cursor = -PlayHalfW + 0.6f, end = PlayHalfW - 0.6f; // the plane's steering limits (Game.HandleInput), not the screen edge
             foreach (var s in spans) { if (s.x - cursor > 0.2f) return true; cursor = Mathf.Max(cursor, s.y); }
             return end - cursor > 0.2f;
         }

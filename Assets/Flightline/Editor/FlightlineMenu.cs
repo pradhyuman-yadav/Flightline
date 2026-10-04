@@ -43,6 +43,10 @@ namespace Flightline.EditorTools
             PlayerSettings.SetManagedStrippingLevel(t, ManagedStrippingLevel.Low);
             PlayerSettings.stripEngineCode = true;
             EditorUserBuildSettings.development = false;
+            { // no hardware stats; the app is fully offline (no public API for this in Unity 6)
+                var pso = new SerializedObject(Unsupported.GetSerializedAssetInterfaceSingleton("PlayerSettings"));
+                var sa = pso.FindProperty("submitAnalytics"); if (sa != null) { sa.boolValue = false; pso.ApplyModifiedPropertiesWithoutUndo(); }
+            }
 
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(Scene, true) };
             Branding.ApplyToPlayerSettings();
@@ -72,6 +76,7 @@ namespace Flightline.EditorTools
         {
             if (!Supported()) return;
             ApplyAndroidSettings();
+            Directory.CreateDirectory(OutDir);
 
             bool hadCustom = PlayerSettings.Android.useCustomKeystore;
             if (release)
@@ -93,7 +98,6 @@ namespace Flightline.EditorTools
             }
             else PlayerSettings.Android.useCustomKeystore = false; // test builds use the debug key
 
-            Directory.CreateDirectory(OutDir);
             string file = release ? $"{OutDir}/Flightline-{Version}-{PlayerSettings.Android.bundleVersionCode}.aab" : $"{OutDir}/Flightline.apk";
             EditorUserBuildSettings.buildAppBundle = release;
             var opts = new BuildPlayerOptions
@@ -104,10 +108,12 @@ namespace Flightline.EditorTools
                 targetGroup = BuildTargetGroup.Android,
                 options = run ? BuildOptions.AutoRunPlayer : BuildOptions.None
             };
+            bool ok = false;
             try
             {
                 var report = BuildPipeline.BuildPlayer(opts);
                 var sum = report.summary;
+                ok = sum.result == UnityEditor.Build.Reporting.BuildResult.Succeeded;
                 string msg = $"{sum.result} | {sum.totalErrors} errors | {sum.totalSize / (1024f * 1024f):0.0} MB | {sum.totalTime:mm\\:ss} | {Path.GetFullPath(file)}";
                 File.WriteAllText($"{OutDir}/last_build.txt", msg);
                 Debug.Log("Flightline Android build: " + msg);
@@ -116,6 +122,9 @@ namespace Flightline.EditorTools
             {
                 PlayerSettings.Android.useCustomKeystore = hadCustom;
                 EditorUserBuildSettings.buildAppBundle = false;
+                // A failed release build never shipped, so give its version code back; a good one is saved to disk right away.
+                if (release && !ok) PlayerSettings.Android.bundleVersionCode--;
+                if (release && ok) AssetDatabase.SaveAssets();
             }
         }
 
@@ -124,20 +133,35 @@ namespace Flightline.EditorTools
         public static void Capture(string path, int w = 540, int h = 1170)
         {
             var cam = Camera.main; var ui = GameObject.Find("UI"); if (cam == null || ui == null) return;
-            var canvas = ui.GetComponent<Canvas>();
+            var canvas = ui.GetComponent<Canvas>(); if (canvas == null) return;
             var rt = new RenderTexture(w, h, 24);
-            canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.worldCamera = cam; canvas.planeDistance = 5;
-            cam.targetTexture = rt; Canvas.ForceUpdateCanvases(); cam.Render();
-            RenderTexture.active = rt;
             var tex = new Texture2D(w, h, TextureFormat.RGB24, false);
-            tex.ReadPixels(new Rect(0, 0, w, h), 0, 0); tex.Apply();
-            File.WriteAllBytes(path, tex.EncodeToPNG());
-            RenderTexture.active = null; cam.targetTexture = null; canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-            UnityEngine.Object.DestroyImmediate(rt); UnityEngine.Object.DestroyImmediate(tex);
+            var prevMode = canvas.renderMode; var prevCam = canvas.worldCamera; var prevDist = canvas.planeDistance;
+            var prevTarget = cam.targetTexture; var prevActive = RenderTexture.active;
+            try
+            {
+                canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.worldCamera = cam; canvas.planeDistance = 5;
+                cam.targetTexture = rt; Canvas.ForceUpdateCanvases(); cam.Render();
+                RenderTexture.active = rt;
+                tex.ReadPixels(new Rect(0, 0, w, h), 0, 0); tex.Apply();
+                File.WriteAllBytes(path, tex.EncodeToPNG());
+            }
+            finally
+            {
+                // always hand the camera and canvas back exactly as they were, even if the write fails
+                RenderTexture.active = prevActive; cam.targetTexture = prevTarget;
+                canvas.renderMode = prevMode; canvas.worldCamera = prevCam; canvas.planeDistance = prevDist;
+                UnityEngine.Object.DestroyImmediate(rt); UnityEngine.Object.DestroyImmediate(tex);
+            }
         }
 
         [MenuItem("Flightline/Reset Save Data")]
-        static void ResetSave() { PlayerPrefs.DeleteKey("flightline.save.v1"); PlayerPrefs.Save(); Debug.Log("Flightline save data cleared."); }
+        static void ResetSave()
+        {
+            // Save.Load restores from the .bak copy when the main key is missing, so all three keys must go.
+            PlayerPrefs.DeleteKey("flightline.save.v1"); PlayerPrefs.DeleteKey("flightline.save.v1.bak"); PlayerPrefs.DeleteKey("flightline.save.v1.corrupt");
+            PlayerPrefs.Save(); Debug.Log("Flightline save data cleared.");
+        }
 
         [MenuItem("Flightline/Give 5000 Coins (testing)")]
         static void Coins() { Save.Load(); Save.D.coins += 5000; Save.Write(); Debug.Log("Added 5000 coins."); }

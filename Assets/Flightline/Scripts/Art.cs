@@ -27,6 +27,9 @@ namespace Flightline
         static Color Hx(string h) { ColorUtility.TryParseHtmlString(h, out var c); return c; }
         static Color G(float v, float a = 1f) => new Color(v, v, v, a);
         static readonly Color Wt = Color.white;
+        // Palette hoisted out of per-pixel lambdas (was parsed with TryParseHtmlString per pixel: millions of calls at startup).
+        static Color Rgb(int v) => new Color(((v >> 16) & 255) / 255f, ((v >> 8) & 255) / 255f, (v & 255) / 255f, 1f);
+        static readonly Color CSig = Rgb(0xffcc00), CSigDk = Rgb(0xe0b300), CDeep = Rgb(0x8a6e00), CBody = Rgb(0xf5f8fa), CWing = Rgb(0xd9e1e8), CDark = Rgb(0x262d34);
 
         public static Sprite Make(string key, int w, int h, float ppu, PixFn fn, Vector2? pivot = null, Vector4 border = default)
         {
@@ -135,7 +138,7 @@ namespace Flightline
 
         public static Sprite Coin => Make("coin", 128, 128, 206, (p, px) =>
         {
-            Color sig = Hx("#ffcc00"), dk = Hx("#e0b300"), deep = Hx("#8a6e00");
+            Color sig = CSig, dk = CSigDk, deep = CDeep;
             var o = new Px(sig); float r = p.magnitude;
             o.Add(deep, Cov(r - 0.96f, px));
             o.Add(sig, Cov(r - 0.84f, px));
@@ -150,7 +153,7 @@ namespace Flightline
 
         public static Sprite Plane => Make("plane", 256, 256, 170, (p, px) =>
         {
-            Color body = Hx("#f5f8fa"), wing = Hx("#d9e1e8"), dark = Hx("#262d34"), sig = Hx("#ffcc00");
+            Color body = CBody, wing = CWing, dark = CDark, sig = CSig;
             var o = new Px(body);
             float fus = Seg(p, new Vector2(0, -0.72f), new Vector2(0, 0.74f), 0.13f);
             o.Add(wing, Cov(Poly(p, WingPts), px));
@@ -240,10 +243,10 @@ namespace Flightline
         {
             float u = p.x / 0.125f * 2f;          // -2..2 units across
             float v = (p.y * 0.5f + 0.5f) * 32f;  // 0..32 units along
-            var asph = Hx("#262d34"); float n = Hash(p) * 0.04f;
+            var asph = CDark; float n = Hash(p) * 0.04f;
             var o = new Px(asph);
             o.Add(new Color(asph.r + n, asph.g + n, asph.b + n, 1f), 1f);
-            var w = Hx("#ffffff");
+            var w = Wt;
             if (Mathf.Abs(Mathf.Abs(u) - 1.75f) < 0.05f) o.Add(w, 0.9f);
             if (Mathf.Abs(u) < 0.06f && v > 3.5f && v < 28.5f && Mathf.Repeat(v, 2f) < 1.1f) o.Add(w, 0.9f);
             bool thr = (v > 0.6f && v < 2.4f) || (v > 29.6f && v < 31.4f);
@@ -264,7 +267,7 @@ namespace Flightline
 
         static Sprite Icon(string g, bool tile) => Make((tile ? "p_" : "g_") + g, 128, 128, 128, (p, px) =>
         {
-            Color asph = Hx("#262d34"), sig = Hx("#ffcc00"), inv = Hx("#f5f8fa");
+            Color asph = CDark, sig = CSig, inv = CBody;
             if (!tile) { p *= 0.72f; px *= 0.72f; } // glyph-only icons fill their box
             var o = new Px(tile ? asph : sig);
             if (tile) o.Add(asph, Cov(Box(p, Vector2.zero, new Vector2(0.99f, 0.99f), 0.06f), px));

@@ -49,20 +49,31 @@ namespace Flightline
 
         static void Tint(LineRenderer lr, Color c) { lr.startColor = c; lr.endColor = c; }
 
+        // Shared scratch buffer for LineRenderer.SetPositions (copies positionCount elements from the start).
+        static Vector3[] posBuf = new Vector3[64];
+        static Vector3[] PosBuf(int n) { if (posBuf.Length < n) posBuf = new Vector3[Mathf.NextPowerOfTwo(n)]; return posBuf; }
+
+        // Reused wind gradient objects; colorGradient setter copies, so no per-spawn allocation is needed.
+        static readonly Gradient windGrad = new Gradient();
+        static readonly GradientColorKey[] windCK = new GradientColorKey[2];
+        static readonly GradientAlphaKey[] windAK = new GradientAlphaKey[4];
+
         static Vector3 Bez(Vector3 a, Vector3 c, Vector3 b, float t) => (1 - t) * (1 - t) * a + 2 * (1 - t) * t * c + t * t * b;
 
         // Jagged lightning along a curved path: bezier spine + random offsets that vanish at the ends.
         static void Zap(LineRenderer lr, Vector3 a, Vector3 c, Vector3 b, float jag)
         {
             int n = lr.positionCount;
+            var buf = PosBuf(n);
             for (int i = 0; i < n; i++)
             {
                 float t = i / (float)(n - 1);
                 var p = Bez(a, c, b, t);
                 var tan = 2 * (1 - t) * (c - a) + 2 * t * (b - c);
                 var nrm = new Vector3(-tan.y, tan.x, 0).normalized;
-                lr.SetPosition(i, p + nrm * (Random.Range(-1f, 1f) * jag * Mathf.Sin(t * Mathf.PI)));
+                buf[i] = p + nrm * (Random.Range(-1f, 1f) * jag * Mathf.Sin(t * Mathf.PI));
             }
+            lr.SetPositions(buf);
         }
 
         Color CellColor() => Color.Lerp(Theme.Get(Tok.Stop), Color.black, 0.28f);
@@ -141,7 +152,10 @@ namespace Flightline
         // ---------------------------------------------------------------- per-frame
         void UpdateWeatherShared(float dt)
         {
-            windScroll += dt * 1.6f;
+            // offset period is 1 UV (Repeat wrap): keep it small so mobile UV precision never degrades in long sessions
+            windScroll = Mathf.Repeat(windScroll + dt * 1.6f, 1f);
+            // windPush is only recomputed while colliding; outside a live run let it settle so clouds/trails stop leaning
+            if (state != GState.Playing && state != GState.Paused) windPush *= Mathf.Exp(-4f * dt);
             if (windMatR != null) windMatR.mainTextureOffset = new Vector2(-windScroll, 0);
             if (windMatL != null) windMatL.mainTextureOffset = new Vector2(windScroll, 0);
         }
@@ -272,12 +286,14 @@ namespace Flightline
             {
                 var l = e.lines[i]; int n = l.positionCount;
                 float k = 0.55f + i * 0.08f, ph = e.phase + i * 1.3f;
+                var buf = PosBuf(n);
                 for (int j = 0; j < n; j++)
                 {
                     float x = camX - W * 0.5f + W * j / (n - 1f);
                     float y = p.y + e.fa[i] + Mathf.Sin(x * k + ph - time * 1.8f * dir) * e.fb[i];
-                    l.SetPosition(j, new Vector3(x, y, 0));
+                    buf[j] = new Vector3(x, y, 0);
                 }
+                l.SetPositions(buf);
             }
             if (collide && Random.value < dt * 5f)
             {
@@ -305,11 +321,12 @@ namespace Flightline
                 float edge = 1f - Mathf.Abs(u - 0.5f) * 2f;
                 float a = Mathf.Lerp(0.12f, 0.5f, edge);
                 var l = e.lines[i]; l.sharedMaterial = mat; l.widthMultiplier = Mathf.Lerp(0.05f, 0.1f, edge);
-                var g = new Gradient();
                 var c = Theme.Get(Tok.RunwayWhite);
-                g.SetKeys(new[] { new GradientColorKey(c, 0), new GradientColorKey(c, 1) },
-                          new[] { new GradientAlphaKey(0, 0), new GradientAlphaKey(a, 0.2f), new GradientAlphaKey(a, 0.8f), new GradientAlphaKey(0, 1) });
-                l.colorGradient = g;
+                windCK[0] = new GradientColorKey(c, 0); windCK[1] = new GradientColorKey(c, 1);
+                windAK[0] = new GradientAlphaKey(0, 0); windAK[1] = new GradientAlphaKey(a, 0.2f);
+                windAK[2] = new GradientAlphaKey(a, 0.8f); windAK[3] = new GradientAlphaKey(0, 1);
+                windGrad.SetKeys(windCK, windAK);
+                l.colorGradient = windGrad;
             }
         }
 

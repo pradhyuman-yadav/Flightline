@@ -28,7 +28,7 @@ namespace Flightline
     public class RunResult
     {
         public int score, coins, earned, near, zone, xp, flight, level, levelUps;
-        public float miles; public bool best; public string reason;
+        public float miles; public bool best, newZone; public string reason;
     }
 
     // Root of the game. Lives on a single GameObject in the scene and builds everything at runtime.
@@ -81,8 +81,9 @@ namespace Flightline
         void Awake()
         {
             I = this;
+            QualitySettings.vSyncCount = 0; // mobile ignores vSyncCount; keeps targetFrameRate authoritative in editor/desktop too
             Application.targetFrameRate = 60;
-            Screen.sleepTimeout = SleepTimeout.NeverSleep;
+            Screen.sleepTimeout = SleepTimeout.SystemSetting; // only kept awake while flying (see SetAwake)
             Save.Load(); Theme.SetNight(false);
             BuildCamera(); BuildWorld(); BuildPlane();
             gameObject.AddComponent<Sfx>().Init();
@@ -150,7 +151,7 @@ namespace Flightline
         // =========================================================== flow
         public void ToMenu()
         {
-            state = GState.Menu; Time.timeScale = 1f; ClearEnts(); Theme.SetNight(false);
+            state = GState.Menu; Time.timeScale = 1f; SetAwake(false); ClearEnts(); Theme.SetNight(false);
             planeX = targetX = 0; planeVX = 0; planeAlt = 0; takeoffT = 0; crashT = 0; crashRot = 0; speed = 0; shieldT = magnetT = boostT = invulnT = 0; headStart = false;
             planeSr.enabled = true; shadowSr.enabled = true;
             runwayT.position = new Vector3(0, PlaneY + 8f - 16f, 0); runway.enabled = true;
@@ -159,6 +160,7 @@ namespace Flightline
 
         public void StartRun()
         {
+            if (state != GState.Menu && state != GState.Over) return; // re-entry guard: double tap / overlapping callers
             ClearEnts(); Theme.SetNight(false);
             var d = Save.D; d.flightNo++; flightNo = d.flightNo;
             run = new Prog.RunStats();
@@ -170,7 +172,7 @@ namespace Flightline
             int hs = Prog.Lvl(Up.HeadStart); headStartMiles = Prog.HeadStartMiles(hs); headStart = hs > 0;
             planeSr.enabled = true; shadowSr.enabled = true; plane.rotation = Quaternion.identity;
             runwayT.position = new Vector3(0, PlaneY + 8f - 16f, 0); runway.enabled = true;
-            state = GState.Playing; Time.timeScale = 1f;
+            state = GState.Playing; Time.timeScale = 1f; SetAwake(true);
             GameUI.I.OnRunStart();
             GameUI.I.Toast($"NOW BOARDING · FLIGHT FL-{flightNo}", $"Gate {Prog.Zones[0].gate} · {Prog.Zones[0].name}. Drag to steer.");
             Sfx.I.Power();
@@ -178,9 +180,12 @@ namespace Flightline
 
         public void Pause(bool on)
         {
-            if (on && state == GState.Playing) { state = GState.Paused; Time.timeScale = 0f; GameUI.I.ShowPause(true); }
-            else if (!on && state == GState.Paused) { state = GState.Playing; Time.timeScale = 1f; GameUI.I.ShowPause(false); dragging = false; }
+            if (on && state == GState.Playing) { state = GState.Paused; Time.timeScale = 0f; SetAwake(false); GameUI.I.ShowPause(true); }
+            else if (!on && state == GState.Paused) { state = GState.Playing; Time.timeScale = 1f; SetAwake(true); GameUI.I.ShowPause(false); dragging = false; }
         }
+
+        // Keep the screen on only during active flight; menus, pause and results let the OS dim/lock as usual.
+        static void SetAwake(bool on) { Screen.sleepTimeout = on ? SleepTimeout.NeverSleep : SleepTimeout.SystemSetting; }
 
         public void EndFromPause()
         {
@@ -190,12 +195,27 @@ namespace Flightline
             EndRun();
         }
 
-        void OnApplicationPause(bool p) { if (p) Pause(true); }
+        // Backgrounded (home, call, app switch): freeze the flight and flush the save, in any state.
+        // Android may kill the process without OnApplicationQuit, so this is the last reliable write.
+        void OnApplicationPause(bool p) { if (p) Background(); }
+        // iOS Control/Notification Centre and Android overlays take focus without pausing the app.
+        void OnApplicationFocus(bool f) { if (!f) Background(); }
+        void OnApplicationQuit() { Save.Write(); }
+
+        void Background()
+        {
+#if UNITY_EDITOR
+            if (autopilot) return; // balance bot runs in background on purpose
+#endif
+            Pause(true);
+            Save.Write();
+        }
 
         // =========================================================== loop
         void Update()
         {
-            float dt = Time.deltaTime;
+            // Cap a single step so a GC/thermal hitch can't teleport the plane through hazards (Unity's own cap is 1/3 s).
+            float dt = Mathf.Min(Time.deltaTime, 1f / 15f * Mathf.Max(1f, Time.timeScale));
             UpdateBounds();
             var kb = Keyboard.current;
             if (state == GState.Paused && kb != null && (kb.escapeKey.wasPressedThisFrame || kb.pKey.wasPressedThisFrame)) { Pause(false); return; }
@@ -522,7 +542,9 @@ namespace Flightline
                 shieldT = 0; invulnT = 1f; run.shieldBlocks++; Missions.Add(MType.ShieldBlocks, 1);
                 if (!area) Smash(e); Pop("SHIELD HIT", Tok.HudCaution); shake = 0.3f; return !area;
             }
+#if UNITY_EDITOR
             killer = $"{e.kind}@{e.chunk} px={planeX:0.00} hx={e.t.position.x:0.00} hy={e.t.position.y - PlaneY:0.00} r={e.r:0.00} tx={targetX:0.00} vx={planeVX:0.0}";
+#endif
             Crash("crash");
             return false;
         }
@@ -576,7 +598,7 @@ namespace Flightline
             MoveEnts(dt, false);
             if (runway.enabled) runwayT.position += Vector3.down * speed * dt;
             if (endReason == "crash" && crashT < 0.6f && Random.value < 0.5f) Emit(plane.position, Random.insideUnitCircle * 0.5f, new Color(0.3f, 0.3f, 0.3f, 0.6f), 0.8f, 0.2f, 0.6f, true, 8);
-            if (crashT > 1.4f) { state = GState.Over; planeSr.enabled = false; shadowSr.enabled = false; EndRun(); }
+            if (crashT > 1.4f) { state = GState.Over; planeSr.enabled = false; shadowSr.enabled = false; SetAwake(false); EndRun(); }
         }
 
         void EndRun()
@@ -587,12 +609,18 @@ namespace Flightline
             bool best = run.score > d.bestScore && run.score > 0;
             d.coins += earned; d.totalCoins += earned; d.totalMiles += (long)miles; d.runs++;
             if (best) d.bestScore = run.score;
+            bool newZone = zone > d.maxZone;
             d.bestMiles = Mathf.Max(d.bestMiles, (int)miles); d.maxZone = Mathf.Max(d.maxZone, zone);
             int xp = Mathf.RoundToInt(miles / 10f) + run.nearMiss * 5 + run.coins;
             var ups = new List<int>(); Prog.AddXp(xp, ups);
             if (d.recentMiles == null) d.recentMiles = new List<int>();
             d.recentMiles.Add((int)miles); while (d.recentMiles.Count > 5) d.recentMiles.RemoveAt(0);
-            if (endReason != "abort") { ReportMissions(); Missions.Add(MType.Flights, 1); }
+            if (endReason != "abort")
+            {
+                // A flight that crossed local midnight credits today's set; the whole run's miles count toward the new day.
+                if (Missions.EnsureToday()) lastMilesReported = 0;
+                ReportMissions(); Missions.Add(MType.Flights, 1);
+            }
             var achs = Prog.Check(run);
             Save.Write();
 #if UNITY_EDITOR
@@ -601,7 +629,7 @@ namespace Flightline
             GameUI.I.ShowGameOver(new RunResult
             {
                 score = run.score, coins = run.coins, earned = earned, near = run.nearMiss, zone = zone, xp = xp, flight = flightNo,
-                level = d.level, levelUps = ups.Count, miles = miles, best = best, reason = endReason
+                level = d.level, levelUps = ups.Count, miles = miles, best = best, newZone = newZone, reason = endReason
             });
             foreach (var l in ups) { GameUI.I.Toast($"PROMOTED · LV {l}", $"{Prog.Rank(l)}. +{Prog.LevelReward(l)} coins."); }
             foreach (var a in achs) GameUI.I.AchToast(a);
@@ -770,7 +798,7 @@ namespace Flightline
         public void StartBot(bool on, float timeScale = 3f)
         {
             autopilot = on; botTimeScale = timeScale; Save.Suspend = on;
-            if (on) { Application.runInBackground = true; BotLog.Clear(); StartRun(); Time.timeScale = timeScale; }
+            if (on) { Application.runInBackground = true; BotLog.Clear(); if (state != GState.Menu) state = GState.Over; StartRun(); Time.timeScale = timeScale; } // StartRun ignores calls mid-flight
             else { Time.timeScale = 1f; Save.Load(); ToMenu(); }
         }
 
