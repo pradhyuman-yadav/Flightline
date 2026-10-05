@@ -52,8 +52,15 @@ namespace Flightline.EditorTools
             if (g.state == GState.Playing)
             {
                 g.fuel = Mathf.Max(g.fuel, 0.8f); // no FUEL LOW warnings in the shots
+                float speedUp = 3f;
                 foreach (var (name, miles) in Zones)
-                    if (!done.Contains(name) && g.miles >= miles) { Shot(name); break; }
+                {
+                    if (done.Contains(name)) continue;
+                    if (g.miles >= miles - 600f) speedUp = 1f; // real time just before a shot, so the HUD isn't mid-bounce
+                    if (g.miles >= miles) Shot(name);
+                    break;
+                }
+                Time.timeScale = speedUp; g.botTimeScale = speedUp;
                 bool allZones = true; foreach (var z in Zones) allZones &= done.Contains(z.name);
                 g.autopilot = !allZones; // after the zone shots, let the run end for the boarding pass
                 return;
