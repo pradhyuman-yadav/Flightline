@@ -10,7 +10,7 @@ namespace Flightline
     {
         public const string PrivacyUrl = "https://thepk.in/privacy";
         // Fill in after creating the app in App Store Connect (App Information > Apple ID, digits only).
-        public const string AppStoreId = "";
+        public const string AppStoreId = "6819109667";
 #if UNITY_IOS
         public static bool HasStorePage => AppStoreId.Length > 0;
         public static string StoreUrl => $"https://apps.apple.com/app/id{AppStoreId}?action=write-review";
