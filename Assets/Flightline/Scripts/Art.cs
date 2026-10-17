@@ -118,6 +118,25 @@ namespace Flightline
             }
         }
 
+        // Soft cross-section for contrail ribbons: dense core, feathered edges (v runs across the ribbon).
+        static Texture2D vapourTex;
+        public static Texture2D Vapour
+        {
+            get
+            {
+                if (vapourTex != null) return vapourTex;
+                vapourTex = new Texture2D(4, 32, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, name = "vapour" };
+                var px = new Color[4 * 32];
+                for (int y = 0; y < 32; y++)
+                {
+                    float v = (y + 0.5f) / 16f - 1f, a = Mathf.Clamp01(1f - v * v);
+                    for (int x = 0; x < 4; x++) px[y * 4 + x] = new Color(1, 1, 1, a * a);
+                }
+                vapourTex.SetPixels(px); vapourTex.Apply(false, true);
+                return vapourTex;
+            }
+        }
+
         // ---------- World ----------
         public static Sprite Circle => Make("circle", 64, 64, 64, (p, px) => G(1, Cov(p.magnitude - 0.96f, px)));
         public static Sprite Soft => Make("soft", 64, 64, 64, (p, px) => { float a = Mathf.Clamp01(1f - p.magnitude); return G(1, a * a); });
