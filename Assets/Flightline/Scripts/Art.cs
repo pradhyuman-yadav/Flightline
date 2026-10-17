@@ -202,6 +202,61 @@ namespace Flightline
             return G(sh, Cov(CloudSdf(p), px * 7f));
         });
 
+        // Volumetric cumulus seen from above. Puffs are smooth-unioned, then eroded with fbm for a cauliflower edge;
+        // a height field from the density lights the tops toward the sun (upper left) and cools the flanks.
+        public static Sprite CloudVol(int v) => Make("cloudv" + v, 256, 160, 85, (p, px) => CloudPx(p, v % CloudPuffs.Length));
+
+        static readonly Vector3[][] CloudPuffs = // x, y, radius
+        {
+            new[] { new Vector3(-0.9f, -0.15f, 0.45f), new Vector3(-0.4f, 0.12f, 0.58f), new Vector3(0.2f, 0.2f, 0.62f), new Vector3(0.8f, -0.08f, 0.5f), new Vector3(-0.05f, -0.25f, 0.55f), new Vector3(0.55f, -0.3f, 0.42f) },
+            new[] { new Vector3(-0.5f, 0f, 0.6f), new Vector3(0.15f, 0.15f, 0.68f), new Vector3(0.7f, -0.1f, 0.5f), new Vector3(0f, -0.3f, 0.5f), new Vector3(-1.0f, -0.25f, 0.35f), new Vector3(1.05f, -0.3f, 0.3f) },
+            new[] { new Vector3(-0.75f, 0.05f, 0.55f), new Vector3(-0.25f, -0.2f, 0.5f), new Vector3(0.45f, 0.1f, 0.55f), new Vector3(0.95f, -0.15f, 0.42f), new Vector3(0.15f, -0.3f, 0.4f), new Vector3(-1.1f, -0.25f, 0.3f) },
+        };
+        static readonly Vector3 CloudSun = new Vector3(-0.55f, 0.6f, 0.6f).normalized;
+        static readonly Color CloudShade = new Color(0.72f, 0.79f, 0.9f);
+
+        static float Fbm(Vector2 p)
+        {
+            float s = 0f, a = 0.5f;
+            for (int i = 0; i < 4; i++) { s += a * (Mathf.PerlinNoise(p.x + 31.7f * i, p.y + 17.3f * i) - 0.5f); p *= 2.03f; a *= 0.5f; }
+            return s;
+        }
+
+        // depth inside the cloud (> 0 inside)
+        static float CloudDepth(Vector2 p, int v)
+        {
+            var puffs = CloudPuffs[v];
+            float d = Circ(p, puffs[0], puffs[0].z);
+            for (int i = 1; i < puffs.Length; i++) d = SMin(d, Circ(p, puffs[i], puffs[i].z), 0.25f);
+            return -(d + Fbm(p * 2.6f + new Vector2(v * 7.31f, v * 3.17f)) * 0.3f);
+        }
+
+        static float CloudHeight(Vector2 p, int v) => Mathf.Sqrt(Mathf.Max(0f, CloudDepth(p, v) + 0.05f)); // domes rise fast, then flatten
+
+        static Color CloudPx(Vector2 p, int v)
+        {
+            float depth = CloudDepth(p, v);
+            if (depth < -0.1f) return new Color(1, 1, 1, 0);
+            float a = Mathf.SmoothStep(0f, 1f, depth / 0.22f);
+            const float e = 0.045f, bump = 0.55f;
+            float hx = CloudHeight(p + new Vector2(e, 0), v) - CloudHeight(p - new Vector2(e, 0), v);
+            float hy = CloudHeight(p + new Vector2(0, e), v) - CloudHeight(p - new Vector2(0, e), v);
+            var n = new Vector3(-hx / (2f * e) * bump, -hy / (2f * e) * bump, 1f).normalized;
+            float lit = Mathf.Clamp01(Vector3.Dot(n, CloudSun));
+            lit *= 0.72f + 0.28f * Mathf.SmoothStep(0f, 1f, (p.y + 0.75f) / 1.3f); // the base sits in its own shadow
+            lit = Mathf.Lerp(lit, 1f, (1f - a) * 0.45f); // thin edges let light through
+            var c = Color.Lerp(CloudShade, Wt, Mathf.SmoothStep(0f, 1f, (lit - 0.25f) / 0.6f));
+            c.a = a;
+            return c;
+        }
+
+        // Screen-edge mist while flying through cloud: clear centre, foggy rim.
+        public static Sprite Vignette => Make("vignette", 64, 128, 64, (p, px) =>
+        {
+            float r = new Vector2(p.x * 2f, p.y).magnitude;
+            return G(1, Mathf.SmoothStep(0f, 1f, (r - 0.45f) / 0.9f));
+        });
+
         public static Sprite Storm => Make("storm", 256, 160, 142, (p, px) =>
         {
             float d = CloudSdf(p);

@@ -57,7 +57,7 @@ namespace Flightline
             float dy = speed * dt, dx = windPush * 0.45f * dt; // contrails bend with the wind
             bool emit = state == GState.Playing, burner = boostT > 0 || headStart;
             // vapour only forms once the jet is climbing out
-            float form = Mathf.SmoothStep(0f, 1f, (planeAlt - 0.35f) / 0.55f);
+            float form = Mathf.SmoothStep(0f, 1f, (planeAlt - 0.35f) / 0.55f) * (1f - cloudK); // and not inside cloud
             float tipK = form * Mathf.SmoothStep(0f, 1f, (Mathf.Abs(bank) - 18f) / 22f);
             var col = Theme.Get(Tok.RunwayWhite);
             for (int i = 0; i < trails.Length; i++)

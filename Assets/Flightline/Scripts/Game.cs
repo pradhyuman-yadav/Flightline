@@ -85,7 +85,7 @@ namespace Flightline
             Application.targetFrameRate = 60;
             Screen.sleepTimeout = SleepTimeout.SystemSetting; // only kept awake while flying (see SetAwake)
             Save.Load(); Theme.SetNight(false);
-            BuildCamera(); BuildWorld(); BuildPlane(); BuildTrails();
+            BuildCamera(); BuildWorld(); BuildPlane(); BuildTrails(); BuildBanks();
             gameObject.AddComponent<Sfx>().Init();
             gameObject.AddComponent<GameUI>().Build(this);
             ToMenu();
@@ -121,14 +121,14 @@ namespace Flightline
             }
             for (int i = 0; i < 7; i++)
             {
-                var c = SR(world, "FarCloud", Art.Cloud, -90, Color.white);
+                var c = SR(world, "FarCloud", Art.CloudVol(i), -90, Color.white);
                 c.transform.position = new Vector3(Random.Range(-5f, 5f), Random.Range(-10f, 10f), 0); c.transform.localScale = Vector3.one * Random.Range(0.55f, 0.95f);
                 c.flipX = Random.value < 0.5f; farClouds.Add(c);
             }
             runway = SR(world, "Runway", Art.Runway, -80, Color.white); runwayT = runway.transform;
             for (int i = 0; i < 4; i++)
             {
-                var c = SR(world, "NearCloud", Art.Cloud, -70, Color.white);
+                var c = SR(world, "NearCloud", Art.CloudVol(i + 1), -70, Color.white);
                 c.transform.position = new Vector3(Random.Range(-5f, 5f), Random.Range(-10f, 10f), 0); c.transform.localScale = Vector3.one * Random.Range(1.2f, 1.7f);
                 c.flipX = Random.value < 0.5f; nearClouds.Add(c);
             }
@@ -153,7 +153,7 @@ namespace Flightline
         {
             state = GState.Menu; Time.timeScale = 1f; SetAwake(false); ClearEnts(); Theme.SetNight(false);
             planeX = targetX = 0; planeVX = 0; planeAlt = 0; takeoffT = 0; crashT = 0; crashRot = 0; speed = 0; shieldT = magnetT = boostT = invulnT = 0; headStart = false;
-            bank = bankV = planeTilt = 0; ClearTrails();
+            bank = bankV = planeTilt = 0; ClearTrails(); ResetBanks();
             planeSr.enabled = true; shadowSr.enabled = true;
             runwayT.position = new Vector3(0, PlaneY + 8f - 16f, 0); runway.enabled = true;
             GameUI.I.ShowTitle();
@@ -169,7 +169,7 @@ namespace Flightline
             shieldT = magnetT = boostT = invulnT = 0; lowFuelWarned = false; achTimer = 0;
             nextRowAt = 26f; nextFuelAt = 45f; nextPowerAt = Random.Range(90f, 130f);
             ResetDirector(); Missions.EnsureToday(); paidZone = d.maxZone;
-            planeX = targetX = 0; planeVX = 0; dragging = false; planeAlt = 0; bank = bankV = planeTilt = 0; ClearTrails();
+            planeX = targetX = 0; planeVX = 0; dragging = false; planeAlt = 0; bank = bankV = planeTilt = 0; ClearTrails(); ResetBanks();
             int hs = Prog.Lvl(Up.HeadStart); headStartMiles = Prog.HeadStartMiles(hs); headStart = hs > 0;
             planeSr.enabled = true; shadowSr.enabled = true; plane.rotation = Quaternion.identity;
             runwayT.position = new Vector3(0, PlaneY + 8f - 16f, 0); runway.enabled = true;
@@ -241,7 +241,7 @@ namespace Flightline
             UpdateTrails(dt);
             UpdateWeatherShared(dt);
             UpdateCamera(dt);
-            Sfx.I.SetWind(state == GState.Playing ? 0.04f + speed * 0.006f + Mathf.Abs(windPush) * 0.01f : 0.03f);
+            Sfx.I.SetWind(state == GState.Playing ? 0.04f + speed * 0.006f + Mathf.Abs(windPush) * 0.01f + cloudK * 0.06f : 0.03f);
         }
 
         // Camera drifts a little toward the plane and rolls with its turns, so the world never feels locked to a grid.
@@ -653,8 +653,9 @@ namespace Flightline
             nightK = Mathf.MoveTowards(nightK, Theme.Night ? 1f : 0f, dt * 0.7f);
             var cloudC = Color.Lerp(Theme.Get(Tok.Cloud, false), Theme.Get(Tok.Cloud, true), nightK);
 
-            Wrap(farClouds, sp * 0.3f * dt, w, 2f, cloudC, 0.75f, 0.12f, dt);
+            Wrap(farClouds, sp * 0.3f * dt, w, 2f, Color.Lerp(cloudC, skyBase.color, 0.3f), 0.75f, 0.12f, dt); // far: hazed into the sky
             Wrap(nearClouds, sp * 0.62f * dt, w, 3f, cloudC, 0.9f, 0.25f, dt);
+            UpdateBanks(dt, cloudC);
             float sa = Mathf.Clamp01((speed - 7.5f) / 6f) * 0.28f + (boostT > 0 || headStart ? 0.25f : 0f);
             Wrap(streaks, sp * 1.8f * dt, w, 2f, Theme.Get(Tok.RunwayWhite, sa), 1f, 0f, dt);
             var lean = Quaternion.Euler(0, 0, Mathf.Clamp(planeVX * 1.4f - windPush * 2f, -14f, 14f)); // streaks lean with motion
@@ -717,7 +718,7 @@ namespace Flightline
             float air = flying ? planeAlt : 0f;
             float n1 = Mathf.PerlinNoise(t * 0.37f, 0.3f) - 0.5f, n2 = Mathf.PerlinNoise(2.7f, t * 0.29f) - 0.5f, n3 = Mathf.PerlinNoise(t * 0.53f, 5.1f) - 0.5f;
             // runway rumble fades out as the wheels leave the ground
-            float rum = flying ? (1f - planeAlt) * Mathf.Clamp01(speed / 7f) : 0f;
+            float rum = flying ? Mathf.Max((1f - planeAlt) * Mathf.Clamp01(speed / 7f), cloudK * 0.7f) : 0f; // also bumpy inside cloud
             float jx = (Mathf.PerlinNoise(t * 31f, 1.7f) - 0.5f) * 0.035f * rum, jy = (Mathf.PerlinNoise(9.2f, t * 27f) - 0.5f) * 0.03f * rum;
 
             // nose follows the flight path, but gently: a little yaw leads the turn, the bank does the rest
