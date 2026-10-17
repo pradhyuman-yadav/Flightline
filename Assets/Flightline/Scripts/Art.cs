@@ -170,7 +170,9 @@ namespace Flightline
         static readonly Vector2[] WingPts = { new Vector2(-0.95f, -0.08f), new Vector2(-0.1f, 0.32f), new Vector2(0.1f, 0.32f), new Vector2(0.95f, -0.08f), new Vector2(0.95f, -0.2f), new Vector2(0.1f, 0.02f), new Vector2(-0.1f, 0.02f), new Vector2(-0.95f, -0.2f) };
         static readonly Vector2[] TailPts = { new Vector2(-0.36f, -0.8f), new Vector2(-0.05f, -0.56f), new Vector2(0.05f, -0.56f), new Vector2(0.36f, -0.8f), new Vector2(0.36f, -0.9f), new Vector2(-0.36f, -0.9f) };
 
-        public static Sprite Plane => Make("plane", 256, 256, 170, (p, px) =>
+        public static Sprite Plane => Make("plane", 256, 256, 170, PlanePx);
+
+        static Color PlanePx(Vector2 p, float px)
         {
             Color body = CBody, wing = CWing, dark = CDark, sig = CSig;
             var o = new Px(body);
@@ -184,7 +186,31 @@ namespace Flightline
             o.Add(sig, Cov(Seg(p, new Vector2(0, -0.8f), new Vector2(0, -0.5f), 0.045f), px));
             o.Add(dark, Cov(Seg(p, new Vector2(-0.04f, 0.6f), new Vector2(0.04f, 0.6f), 0.05f), px));
             return o.c;
-        });
+        }
+
+        // Crash debris: the plane cut along jagged break lines into wings, nose, centre section and tail.
+        // Each piece pivots on its own centre (so it tumbles in place) and is scorched along the tear.
+        public static readonly Vector2[] PieceCenter = { new Vector2(-0.55f, 0.02f), new Vector2(0.55f, 0.02f), new Vector2(0f, 0.42f), new Vector2(0f, -0.15f), new Vector2(0f, -0.72f) };
+        static readonly Color CChar = Rgb(0x2b2522);
+
+        static int PieceOf(Vector2 p)
+        {
+            float jx = 0.035f * Mathf.Sin(p.y * 37f), jy = 0.03f * Mathf.Sin(p.x * 41f + 1f);
+            if (p.y < -0.48f + jy) return 4;
+            if (p.x < -0.17f + jx) return 0;
+            if (p.x > 0.17f + jx) return 1;
+            return p.y > 0.14f + jy ? 2 : 3;
+        }
+
+        public static Sprite PlanePiece(int i) => Make("planep" + i, 256, 256, 170, (p, px) =>
+        {
+            if (PieceOf(p) != i) return new Color(1, 1, 1, 0);
+            var c = PlanePx(p, px);
+            const float e = 0.035f;
+            bool edge = PieceOf(p + new Vector2(e, 0)) != i || PieceOf(p - new Vector2(e, 0)) != i || PieceOf(p + new Vector2(0, e)) != i || PieceOf(p - new Vector2(0, e)) != i;
+            if (edge) { float a = c.a; c = Color.Lerp(c, CChar, 0.75f); c.a = a; }
+            return c;
+        }, new Vector2(0.5f + PieceCenter[i].x * 0.5f, 0.5f + PieceCenter[i].y * 0.5f));
 
         static float CloudSdf(Vector2 p)
         {
@@ -204,7 +230,9 @@ namespace Flightline
 
         // Volumetric cumulus seen from above. Puffs are smooth-unioned, then eroded with fbm for a cauliflower edge;
         // a height field from the density lights the tops toward the sun (upper left) and cools the flanks.
-        public static Sprite CloudVol(int v) => Make("cloudv" + v, 256, 160, 85, (p, px) => CloudPx(p, v % CloudPuffs.Length));
+        public static Sprite CloudVol(int v) => Make("cloudv" + v, 256, 160, 85, (p, px) => CloudPx(p, v % CloudPuffs.Length, CloudShade, 0f));
+        // Storm cells: the same volumetric puffs with deeper shadows; tinted dark grey and lit from inside by lightning.
+        public static Sprite StormVol(int v) => Make("stormv" + v, 256, 160, 142, (p, px) => CloudPx(p, v % CloudPuffs.Length, StormShade, 11f));
 
         static readonly Vector3[][] CloudPuffs = // x, y, radius
         {
@@ -213,7 +241,7 @@ namespace Flightline
             new[] { new Vector3(-0.75f, 0.05f, 0.55f), new Vector3(-0.25f, -0.2f, 0.5f), new Vector3(0.45f, 0.1f, 0.55f), new Vector3(0.95f, -0.15f, 0.42f), new Vector3(0.15f, -0.3f, 0.4f), new Vector3(-1.1f, -0.25f, 0.3f) },
         };
         static readonly Vector3 CloudSun = new Vector3(-0.55f, 0.6f, 0.6f).normalized;
-        static readonly Color CloudShade = new Color(0.72f, 0.79f, 0.9f);
+        static readonly Color CloudShade = new Color(0.72f, 0.79f, 0.9f), StormShade = new Color(0.42f, 0.45f, 0.55f);
 
         static float Fbm(Vector2 p)
         {
@@ -223,29 +251,29 @@ namespace Flightline
         }
 
         // depth inside the cloud (> 0 inside)
-        static float CloudDepth(Vector2 p, int v)
+        static float CloudDepth(Vector2 p, int v, float seed)
         {
             var puffs = CloudPuffs[v];
             float d = Circ(p, puffs[0], puffs[0].z);
             for (int i = 1; i < puffs.Length; i++) d = SMin(d, Circ(p, puffs[i], puffs[i].z), 0.25f);
-            return -(d + Fbm(p * 2.6f + new Vector2(v * 7.31f, v * 3.17f)) * 0.3f);
+            return -(d + Fbm(p * 2.6f + new Vector2(v * 7.31f + seed, v * 3.17f + seed)) * 0.3f);
         }
 
-        static float CloudHeight(Vector2 p, int v) => Mathf.Sqrt(Mathf.Max(0f, CloudDepth(p, v) + 0.05f)); // domes rise fast, then flatten
+        static float CloudHeight(Vector2 p, int v, float seed) => Mathf.Sqrt(Mathf.Max(0f, CloudDepth(p, v, seed) + 0.05f)); // domes rise fast, then flatten
 
-        static Color CloudPx(Vector2 p, int v)
+        static Color CloudPx(Vector2 p, int v, Color shade, float seed)
         {
-            float depth = CloudDepth(p, v);
+            float depth = CloudDepth(p, v, seed);
             if (depth < -0.1f) return new Color(1, 1, 1, 0);
             float a = Mathf.SmoothStep(0f, 1f, depth / 0.22f);
             const float e = 0.045f, bump = 0.55f;
-            float hx = CloudHeight(p + new Vector2(e, 0), v) - CloudHeight(p - new Vector2(e, 0), v);
-            float hy = CloudHeight(p + new Vector2(0, e), v) - CloudHeight(p - new Vector2(0, e), v);
+            float hx = CloudHeight(p + new Vector2(e, 0), v, seed) - CloudHeight(p - new Vector2(e, 0), v, seed);
+            float hy = CloudHeight(p + new Vector2(0, e), v, seed) - CloudHeight(p - new Vector2(0, e), v, seed);
             var n = new Vector3(-hx / (2f * e) * bump, -hy / (2f * e) * bump, 1f).normalized;
             float lit = Mathf.Clamp01(Vector3.Dot(n, CloudSun));
             lit *= 0.72f + 0.28f * Mathf.SmoothStep(0f, 1f, (p.y + 0.75f) / 1.3f); // the base sits in its own shadow
             lit = Mathf.Lerp(lit, 1f, (1f - a) * 0.45f); // thin edges let light through
-            var c = Color.Lerp(CloudShade, Wt, Mathf.SmoothStep(0f, 1f, (lit - 0.25f) / 0.6f));
+            var c = Color.Lerp(shade, Wt, Mathf.SmoothStep(0f, 1f, (lit - 0.25f) / 0.6f));
             c.a = a;
             return c;
         }
@@ -281,6 +309,46 @@ namespace Flightline
             float stripe = Mathf.Abs(Mathf.Abs(p.x) - 0.24f) - 0.05f;
             o.Add(G(0.7f), Cov(Mathf.Max(bd + 0.02f, stripe), px));
             o.Add(Wt, Cov(Circ(p, new Vector2(-0.24f, 0.55f), 0.12f), px * 4f));
+            return o.c;
+        }, new Vector2(0.5f, 0.65f));
+
+        // Hot-air balloon: striped gores wrapped round a sunlit envelope, a dark mouth band, rigging and a wicker basket.
+        // Envelope dome matches the old balloon (centre 0,0.3 r 0.6) so the hit circle still fits.
+        static readonly Color[][] BalloonPal = { new[] { Rgb(0xd8342c), Rgb(0xffcc00) }, new[] { Rgb(0x2a6fd6), Rgb(0xf5f8fa) }, new[] { Rgb(0xf07a1a), Rgb(0x6b3fa0) } };
+        static readonly Color CWicker = Rgb(0x9a6a36), CWickerDk = Rgb(0x5e3d1c), CRope = Rgb(0x4a3a2a), CMouth = Rgb(0x3a2c26);
+        static readonly Vector3 BalloonSun = new Vector3(-0.5f, 0.45f, 0.75f).normalized;
+        static readonly Vector2[] EnvelopePts = { new Vector2(-0.5f, 0.05f), new Vector2(0.5f, 0.05f), new Vector2(0.17f, -0.4f), new Vector2(-0.17f, -0.4f) };
+
+        public static Sprite HotAirBalloon(int v) => Make("hab" + v, 128, 192, 128, (p, px) =>
+        {
+            var pal = BalloonPal[v % BalloonPal.Length];
+            var o = new Px(pal[0]);
+            for (int s = -1; s <= 1; s += 2) o.Add(CRope, Cov(Seg(p, new Vector2(s * 0.16f, -0.38f), new Vector2(s * 0.085f, -0.67f), 0.012f), px));
+            float bk = Box(p, new Vector2(0, -0.75f), new Vector2(0.11f, 0.09f), 0.025f);
+            o.Add(CWicker, Cov(bk, px));
+            float f = Mathf.Repeat(p.y * 30f, 1f);
+            o.Add(CWickerDk, Cov(Mathf.Max(bk + 0.012f, Mathf.Min(f, 1f - f) / 30f - 0.005f), px) * 0.7f); // weave
+            o.Add(CWickerDk, Cov(Box(p, new Vector2(0, -0.665f), new Vector2(0.12f, 0.018f), 0.01f), px)); // rim
+
+            float ed = SMin(Circ(p, new Vector2(0, 0.3f), 0.6f), Poly(p, EnvelopePts), 0.12f);
+            float cov = Cov(ed, px);
+            if (cov <= 0f) return o.c;
+            // envelope half-width at this height, to wrap the gores round it
+            float w = p.y >= 0.3f ? Mathf.Sqrt(Mathf.Max(0.0004f, 0.36f - (p.y - 0.3f) * (p.y - 0.3f)))
+                                  : 0.17f + 0.43f * Mathf.Pow(Mathf.Sin(Mathf.Clamp01((p.y + 0.4f) / 0.7f) * Mathf.PI * 0.5f), 0.8f);
+            float nx = Mathf.Clamp(p.x / w, -0.999f, 0.999f);
+            float g = (Mathf.Asin(nx) / Mathf.PI + 0.5f) * 10f, fr = g - Mathf.Floor(g);
+            int gore = (int)Mathf.Floor(g);
+            float seam = px * 10f / (Mathf.PI * w * Mathf.Sqrt(1f - nx * nx)); // one pixel, in gore units
+            var col = Color.Lerp(pal[gore & 1], pal[(gore + 1) & 1], 0.5f * (1f - Mathf.Clamp01(Mathf.Min(fr, 1f - fr) / seam)));
+            float ny = p.y >= 0.3f ? (p.y - 0.3f) / 0.6f * 0.9f : -0.35f * Mathf.Clamp01((0.3f - p.y) / 0.7f);
+            var n = new Vector3(nx, ny, Mathf.Sqrt(Mathf.Max(0.05f, 1f - nx * nx - ny * ny))).normalized;
+            float lit = 0.42f + 0.58f * Mathf.Clamp01(Vector3.Dot(n, BalloonSun));
+            col = new Color(col.r * lit, col.g * lit, col.b * lit);
+            col = Color.Lerp(col, Wt, 0.4f * Mathf.Clamp01(1f - Circ(p, new Vector2(-0.24f, 0.55f), 0.02f) / 0.2f)); // sheen
+            if (p.y < -0.32f) col = CMouth;
+            o.Add(col, cov);
+            o.Add(new Color(1f, 0.8f, 0.3f), Cov(Circ(p, new Vector2(0, -0.44f), 0.035f), px * 3f)); // burner
             return o.c;
         }, new Vector2(0.5f, 0.65f));
 

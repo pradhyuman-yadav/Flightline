@@ -81,7 +81,7 @@ namespace Flightline
                 wispT -= 0.025f;
                 var c = cloudC; c.a = 0.3f * cloudK;
                 var at = pp + new Vector3(Random.Range(-1.8f, 1.8f), Random.Range(0.2f, 2.8f), 0);
-                Emit(at, new Vector2(0, -speed * 0.7f), c, 0.45f, Random.Range(0.5f, 0.9f), 1.3f, true, 13, 0f, true);
+                Emit(at, new Vector2(0, -speed * 0.7f), c, 0.45f, Random.Range(0.5f, 0.9f), 1.3f, true, 13, 0f, Art.Soft);
             }
         }
     }

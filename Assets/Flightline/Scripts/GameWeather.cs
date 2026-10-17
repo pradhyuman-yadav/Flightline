@@ -76,7 +76,7 @@ namespace Flightline
             lr.SetPositions(buf);
         }
 
-        Color CellColor() => Color.Lerp(Theme.Get(Tok.Stop), Color.black, 0.28f);
+        Color CellColor() => StormColor();
 
         // ---------------------------------------------------------------- create / init
         void CreateWeather(Ent e)
@@ -84,7 +84,7 @@ namespace Flightline
             switch (e.kind)
             {
                 case Kind.Lightning:
-                    e.sr.sprite = Art.Storm; e.sr.sortingOrder = 6; e.r = 0.5f; e.baseScale = 1f;
+                    e.sr.sprite = Art.StormVol(1); e.sr.sortingOrder = 6; e.r = 0.5f; e.baseScale = 1f;
                     e.partSr = new SpriteRenderer[2];
                     e.partSr[0] = SR(e.t, "Charge", Art.Ring, 3, Color.clear);
                     e.partSr[1] = SR(e.t, "Flash", Art.Soft, 2, Color.clear);
@@ -95,8 +95,8 @@ namespace Flightline
                 case Kind.Arc:
                     e.sr.sprite = null; e.r = 0f;
                     e.partSr = new SpriteRenderer[3];
-                    e.partSr[0] = SR(e.t, "NodeA", Art.Storm, 7, Color.white);
-                    e.partSr[1] = SR(e.t, "NodeB", Art.Storm, 7, Color.white);
+                    e.partSr[0] = SR(e.t, "NodeA", Art.StormVol(2), 7, Color.white);
+                    e.partSr[1] = SR(e.t, "NodeB", Art.StormVol(2), 7, Color.white);
                     e.partSr[2] = SR(e.t, "Halo", Art.Soft, 3, Color.clear);
                     e.lines = new LineRenderer[3];
                     e.lines[0] = Line(e.t, "Glow", 10, 0.38f, LineMat, 18, Even);
@@ -174,6 +174,8 @@ namespace Flightline
                 // idle: faint ring at the exact strike reach, readable from far away
                 ring.color = Theme.Get(Tok.HudCaution, 0.14f + 0.06f * Mathf.Sin(time * 3f + e.phase));
                 ring.transform.localScale = Vector3.one * (Rk / 0.45f) / pscale;
+                // the cell grumbles: brief flickers of light inside it
+                e.sr.color = Random.value < dt * 1.5f ? Color.Lerp(CellColor(), StormLit, 0.6f) : CellColor();
                 if (collide && p.y - PlaneY < Mathf.Max(speed, 6f) * 1.0f + 0.4f) { e.warned = true; e.t2 = 0; Sfx.I.Warn(); }
                 return;
             }
@@ -253,7 +255,7 @@ namespace Flightline
             }
             e.partSr[0].transform.position = A;
             e.partSr[1].transform.position = B;
-            e.partSr[1].sprite = e.mode == 0 ? Art.Storm : Art.Soft;
+            e.partSr[1].sprite = e.mode == 0 ? Art.StormVol(2) : Art.Soft;
             if (e.mode == 1) { e.partSr[1].color = Theme.Get(Tok.HudCaution, 0.9f); e.partSr[1].transform.localScale = Vector3.one * (0.9f + Mathf.Sin(time * 18f) * 0.15f); }
             e.partSr[0].transform.localRotation = Quaternion.Euler(0, 0, Mathf.Sin(time + e.phase) * 6f);
 
