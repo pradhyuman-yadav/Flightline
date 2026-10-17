@@ -51,7 +51,7 @@ namespace Flightline
 
         // ----- player -----
         Transform plane, planeShadow; SpriteRenderer planeSr, shieldSr, magnetSr, shadowSr;
-        float planeX, planeVX, targetX, planeAlt, planeTilt, surge; bool dragging; float dragPointer0, dragPlane0;
+        float planeX, planeVX, targetX, planeAlt, planeTilt, surge, bank, bankV; bool dragging; float dragPointer0, dragPlane0;
         public const float PlaneY = -4.6f; const float PlaneR = 0.36f;
         const float SteerK = 560f, SteerZeta = 0.8f; // spring steering: stiffness and damping ratio (<1 = slight overshoot)
 
@@ -85,7 +85,7 @@ namespace Flightline
             Application.targetFrameRate = 60;
             Screen.sleepTimeout = SleepTimeout.SystemSetting; // only kept awake while flying (see SetAwake)
             Save.Load(); Theme.SetNight(false);
-            BuildCamera(); BuildWorld(); BuildPlane();
+            BuildCamera(); BuildWorld(); BuildPlane(); BuildTrails();
             gameObject.AddComponent<Sfx>().Init();
             gameObject.AddComponent<GameUI>().Build(this);
             ToMenu();
@@ -153,6 +153,7 @@ namespace Flightline
         {
             state = GState.Menu; Time.timeScale = 1f; SetAwake(false); ClearEnts(); Theme.SetNight(false);
             planeX = targetX = 0; planeVX = 0; planeAlt = 0; takeoffT = 0; crashT = 0; crashRot = 0; speed = 0; shieldT = magnetT = boostT = invulnT = 0; headStart = false;
+            bank = bankV = planeTilt = 0; ClearTrails();
             planeSr.enabled = true; shadowSr.enabled = true;
             runwayT.position = new Vector3(0, PlaneY + 8f - 16f, 0); runway.enabled = true;
             GameUI.I.ShowTitle();
@@ -168,7 +169,7 @@ namespace Flightline
             shieldT = magnetT = boostT = invulnT = 0; lowFuelWarned = false; achTimer = 0;
             nextRowAt = 26f; nextFuelAt = 45f; nextPowerAt = Random.Range(90f, 130f);
             ResetDirector(); Missions.EnsureToday(); paidZone = d.maxZone;
-            planeX = targetX = 0; planeVX = 0; dragging = false; planeAlt = 0;
+            planeX = targetX = 0; planeVX = 0; dragging = false; planeAlt = 0; bank = bankV = planeTilt = 0; ClearTrails();
             int hs = Prog.Lvl(Up.HeadStart); headStartMiles = Prog.HeadStartMiles(hs); headStart = hs > 0;
             planeSr.enabled = true; shadowSr.enabled = true; plane.rotation = Quaternion.identity;
             runwayT.position = new Vector3(0, PlaneY + 8f - 16f, 0); runway.enabled = true;
@@ -237,6 +238,7 @@ namespace Flightline
             UpdateParticles(dt);
             UpdateFlyers(dt);
             UpdatePlaneVisuals(dt);
+            UpdateTrails(dt);
             UpdateWeatherShared(dt);
             UpdateCamera(dt);
             Sfx.I.SetWind(state == GState.Playing ? 0.04f + speed * 0.006f + Mathf.Abs(windPush) * 0.01f : 0.03f);
@@ -249,7 +251,7 @@ namespace Flightline
             bool live = state == GState.Playing;
             camX = Mathf.Lerp(camX, live ? planeX * 0.12f : 0f, k);
             camY = Mathf.Lerp(camY, state == GState.Menu ? MenuCamY : 0f, 1f - Mathf.Exp(-2.4f * dt));
-            camRoll = Mathf.Lerp(camRoll, live ? Mathf.Clamp(-planeVX * 0.22f, -2.2f, 2.2f) : 0f, k);
+            camRoll = Mathf.Lerp(camRoll, live ? Mathf.Clamp(-bank * 0.045f, -2.2f, 2.2f) : 0f, k);
             shake = Mathf.MoveTowards(shake, 0, dt * 1.6f);
             var sh = shake > 0 ? Random.insideUnitCircle * shake * 0.5f : Vector2.zero;
             cam.transform.SetPositionAndRotation(new Vector3(camX + sh.x, camY + sh.y, -10), Quaternion.Euler(0, 0, camRoll));
@@ -263,7 +265,9 @@ namespace Flightline
             bool burner = boostT > 0 || headStart;
             if (takeoffT < 1.6f) speed = baseSp * Mathf.Lerp(0.05f, 1f, Mathf.SmoothStep(0, 1, takeoffT / 1.6f));
             else speed = Mathf.MoveTowards(speed, baseSp * (burner ? 1.9f : 1f), dt * 7f);
-            planeAlt = Mathf.Clamp01((takeoffT - 0.5f) / 1.2f);
+            // ground roll, rotate at ~0.7 s, then an eased climb-out (smootherstep: no kick at liftoff or level-off)
+            float climb = Mathf.Clamp01((takeoffT - 0.7f) / 1.3f);
+            planeAlt = climb * climb * climb * (climb * (climb * 6f - 15f) + 10f);
 
             float dy = speed * dt; travel += dy;
             float dm = dy * 10f; miles += dm; run.miles = miles;
@@ -293,17 +297,16 @@ namespace Flightline
             achTimer += dt;
             if (achTimer > 0.5f) { achTimer = 0; foreach (var a in Prog.Check(run)) { GameUI.I.AchToast(a); Sfx.I.Chime(); } ReportMissions(); }
 
-            // contrails bend with the wind; afterburner flicker
+            // jet wash hazing the runway on the roll; afterburner flicker (contrails: GameTrails.cs)
             trailT += dt;
-            var drift = new Vector2(windPush * 0.45f, 0);
             while (trailT > 0.016f)
             {
                 trailT -= 0.016f;
-                if (planeAlt > 0.4f)
+                if (planeAlt < 0.6f && Random.value < 0.5f)
                 {
-                    var c = Theme.Get(Tok.RunwayWhite, 0.4f * planeAlt);
-                    Emit(plane.TransformPoint(new Vector3(-0.5f, -0.1f, 0)), drift, c, 0.7f, 0.12f, 0.42f, true, -50, 0.4f);
-                    Emit(plane.TransformPoint(new Vector3(0.5f, -0.1f, 0)), drift, c, 0.7f, 0.12f, 0.42f, true, -50, 0.4f);
+                    var c = Theme.Get(Tok.RunwayWhite, 0.2f * (1f - planeAlt / 0.6f) * Mathf.Clamp01(speed / baseSp));
+                    for (int side = -1; side <= 1; side += 2)
+                        Emit(plane.TransformPoint(new Vector3(side * 0.32f, -0.15f, 0)), new Vector2(Random.Range(-0.5f, 0.5f), -1.5f), c, 0.55f, 0.18f, 0.7f, true, -75, 3f, true);
                 }
                 if (burner)
                 {
@@ -702,18 +705,33 @@ namespace Flightline
                 return;
             }
 
-            // nose follows the flight path: heading from lateral speed vs forward speed
+            bool flying = state == GState.Playing || state == GState.Paused, burner = boostT > 0 || headStart;
+            // Bank into turns through a slightly underdamped spring: the roll lags the input, then settles with a touch
+            // of overshoot. On the runway the wheels keep the wings level.
+            float bankTo = Mathf.Clamp(planeVX * 4.5f, -48f, 48f) * Mathf.Lerp(0.1f, 1f, planeAlt);
+            const float BankK = 140f; float bankC = 2f * Mathf.Sqrt(BankK) * 0.72f;
+            int n = Mathf.Max(1, Mathf.CeilToInt(dt / 0.01f)); float h = dt / n;
+            for (int s = 0; s < n; s++) { bankV += (BankK * (bankTo - bank) - bankC * bankV) * h; bank += bankV * h; }
+
+            // light air: slow, uncorrelated drift in height, sideslip and roll instead of a sine bob
+            float air = flying ? planeAlt : 0f;
+            float n1 = Mathf.PerlinNoise(t * 0.37f, 0.3f) - 0.5f, n2 = Mathf.PerlinNoise(2.7f, t * 0.29f) - 0.5f, n3 = Mathf.PerlinNoise(t * 0.53f, 5.1f) - 0.5f;
+            // runway rumble fades out as the wheels leave the ground
+            float rum = flying ? (1f - planeAlt) * Mathf.Clamp01(speed / 7f) : 0f;
+            float jx = (Mathf.PerlinNoise(t * 31f, 1.7f) - 0.5f) * 0.035f * rum, jy = (Mathf.PerlinNoise(9.2f, t * 27f) - 0.5f) * 0.03f * rum;
+
+            // nose follows the flight path, but gently: a little yaw leads the turn, the bank does the rest
             float fwd = Mathf.Max(speed, 4f) * 1.1f;
-            float heading = -Mathf.Atan2(planeVX, fwd) * Mathf.Rad2Deg * 1.15f;
-            planeTilt = Mathf.Lerp(planeTilt, Mathf.Clamp(heading, -38f, 38f), 1f - Mathf.Exp(-14f * dt));
-            plane.rotation = Quaternion.Euler(0, 0, planeTilt);
-            bool burner = boostT > 0 || headStart;
+            float heading = -Mathf.Atan2(planeVX, fwd) * Mathf.Rad2Deg * 0.75f;
+            planeTilt = Mathf.Lerp(planeTilt, Mathf.Clamp(heading, -24f, 24f), 1f - Mathf.Exp(-9f * dt));
+            plane.rotation = Quaternion.Euler(0, 0, planeTilt + n2 * 4f * air);
             surge = Mathf.Lerp(surge, burner ? 0.35f : 0f, 1f - Mathf.Exp(-3f * dt));
-            float sc = Mathf.Lerp(0.82f, 1f, planeAlt) * (burner ? 1.06f : 1f);
-            float roll = Mathf.Lerp(1f, 0.8f, Mathf.Abs(planeTilt) / 38f); // banking squashes the wings
-            plane.localScale = new Vector3(sc * roll, sc, 1);
-            float bob = state == GState.Playing ? (Mathf.Sin(t * 2.2f) * 0.06f + Mathf.Sin(t * 0.9f) * 0.04f) * planeAlt : 0f;
-            plane.position = new Vector3(planeX, PlaneY + bob + surge, 0);
+            // seen from above, pitching up through rotation and climb-out shortens the fuselage; banking narrows the wings
+            float pitch = flying ? Mathf.Sin(Mathf.PI * Mathf.Clamp01((takeoffT - 0.55f) / 1.7f)) : 0f;
+            float sc = Mathf.Lerp(0.82f, 1f, planeAlt) * (1f + surge * 0.17f);
+            float roll = Mathf.Cos((bank + n3 * 9f * air) * Mathf.Deg2Rad);
+            plane.localScale = new Vector3(sc * roll, sc * (1f - 0.07f * pitch), 1);
+            plane.position = new Vector3(planeX + n2 * 0.08f * air + jx, PlaneY + n1 * 0.18f * air + surge + jy, 0);
             planeSr.color = invulnT > 0 && Mathf.Repeat(t * 10f, 1f) < 0.5f ? new Color(1, 1, 1, 0.45f) : Color.white;
 
             planeShadow.position = plane.position + new Vector3(0.12f + 0.7f * planeAlt, -0.18f - 1.0f * planeAlt, 0);
@@ -730,13 +748,13 @@ namespace Flightline
         }
 
         // =========================================================== particles
-        void Emit(Vector3 pos, Vector2 v, Color c, float life, float s0, float s1, bool scroll, int order = 20, float drag = 2.5f)
+        void Emit(Vector3 pos, Vector2 v, Color c, float life, float s0, float s1, bool scroll, int order = 20, float drag = 2.5f, bool soft = false)
         {
             Particle p;
             if (partPool.Count > 0) p = partPool.Pop();
             else { p = new Particle(); p.sr = SR(world, "Fx", Art.Circle, order, c); p.t = p.sr.transform; }
             p.t.gameObject.SetActive(true); p.t.position = pos; p.v = v; p.c = c; p.life = 0; p.max = life; p.s0 = s0; p.s1 = s1; p.scroll = scroll; p.drag = drag;
-            p.sr.sortingOrder = order; p.t.localScale = Vector3.one * s0; p.sr.color = c;
+            p.sr.sprite = soft ? Art.Soft : Art.Circle; p.sr.sortingOrder = order; p.t.localScale = Vector3.one * s0; p.sr.color = c;
             parts.Add(p);
         }
 
