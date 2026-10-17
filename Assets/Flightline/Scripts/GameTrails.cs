@@ -66,7 +66,7 @@ namespace Flightline
                 for (int j = 0; j < c.n; j++) { c.age[j] += dt; c.p[j].y -= dy; c.p[j].x += dx; }
                 while (c.n > 0 && c.age[c.n - 1] >= c.life) c.n--;
 
-                float s = i < 2 ? form * (burner ? 1.15f : 1f) : tipK;
+                float s = i < 2 ? (planeJet ? form * (burner ? 1.15f : 1f) : 0f) : tipK; // engine contrails are a jet thing
                 c.acc += dt;
                 // keep laying (zero-strength) points while a trail is alive, so a broken trail never bridges its gap
                 if (emit && c.acc >= TrailStep && (s > 0.001f || c.n > 0))

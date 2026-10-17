@@ -45,6 +45,8 @@ namespace Flightline
         TextMeshProUGUI ovOrigin, ovOriginName, ovFlight, ovDest, ovDestName, ovReason, ovMiles, ovCoins, ovNear, ovRank, ovXp; FlapText ovScore; Image ovBestTag, ovXpFill; RectTransform ovCard;
         // Hangar
         TextMeshProUGUI hangarCoins; readonly List<Action> hangarRefresh = new List<Action>();
+        int hangarView; Image showPlane; TextMeshProUGUI showName, showBlurb, showCaps, upTitle; FButton showAct, showPrev, showNext; Springy showSpring;
+        readonly List<(RectTransform fill, TextMeshProUGUI val)> showBars = new List<(RectTransform, TextMeshProUGUI)>();
         // Logbook
         TextMeshProUGUI logCoins, logMiles, logRuns, logBest, logCount; readonly List<Action> logRefresh = new List<Action>();
         // Toast
@@ -565,8 +567,91 @@ namespace Flightline
             var s = MakeScreen("Hangar"); Bg(s, Tok.Surface);
             var col = UI.Fill(UI.Rect(s, "Col"), 16, 16, 16, 16); UI.V(col.gameObject, 10);
             hangarCoins = Header(col, "HANGAR");
-            for (int i = 0; i < Prog.Upgrades.Length; i++) UpgradeCard(col, i);
+            FleetCard(col);
+
+            upTitle = UI.Text(col, "", TS.Label, Tok.InkMuted);
+            var vp = UI.Img(col, "Viewport", Tok.Surface, null, 1, 0f, true); UI.LE(vp, -1, -1, -1, 1); vp.gameObject.AddComponent<RectMask2D>();
+            var content = UI.Rect(vp.transform, "Content"); content.anchorMin = new Vector2(0, 1); content.anchorMax = new Vector2(1, 1); content.pivot = new Vector2(0.5f, 1); content.sizeDelta = Vector2.zero;
+            UI.V(content.gameObject, 10, new RectOffset(0, 0, 2, 12)); UI.Fit(content, false, true);
+            var scroll = vp.gameObject.AddComponent<ScrollRect>(); scroll.viewport = vp.rectTransform; scroll.content = content; scroll.horizontal = false; scroll.movementType = ScrollRect.MovementType.Elastic; scroll.scrollSensitivity = 30;
+            for (int i = 0; i < Prog.Upgrades.Length; i++) UpgradeCard(content, i);
             return s;
+        }
+
+        // Fleet showcase: browse every aircraft with the arrows; locked ones beyond the next unlock show as silhouettes.
+        void FleetCard(Transform col)
+        {
+            var card = UI.Img(col, "Fleet", Tok.SurfaceRaised, Art.RoundRect, UI.RMd); UI.V(card.gameObject, 6, new RectOffset(14, 14, 10, 14)); UI.CardShadow(card);
+            showSpring = card.gameObject.AddComponent<Springy>();
+            var top = UI.Row(card.transform, 8, 112);
+            showPrev = FButton.Make(top, "", BK.Ghost, () => BrowsePlane(-1), 44, Art.Glyph("arrowL")); UI.LE(showPrev, 48, 44);
+            var mid = UI.Rect(top, "Mid"); UI.V(mid.gameObject, 2, null, TextAnchor.MiddleCenter); UI.LE(mid, 0, -1, 1);
+            showPlane = UI.Pic(mid, Art.PlaneArt(0), 84); showPlane.preserveAspect = true;
+            showName = UI.Text(mid, "", TS.Title, Tok.Ink, TextAlignmentOptions.Center); showName.fontSize = 16;
+            showNext = FButton.Make(top, "", BK.Ghost, () => BrowsePlane(1), 44, Art.Glyph("arrowR")); UI.LE(showNext, 48, 44);
+            showBlurb = UI.Text(card.transform, "", TS.Caption, Tok.InkMuted, TextAlignmentOptions.Center, true);
+            foreach (var label in new[] { "SPEED", "RANGE", "COIN VALUE" })
+            {
+                var row = UI.Row(card.transform, 8, 18);
+                var l = UI.Text(row, label, TS.Label, Tok.InkMuted); UI.LE(l, 92, -1);
+                var bg = UI.Img(row, "Bar", Tok.Border, Art.Pill, UI.PillM(8)); UI.LE(bg, 0, 8, 1);
+                var fill = UI.Img(bg.transform, "Fill", Tok.Signal, Art.Pill, UI.PillM(8)).rectTransform;
+                fill.anchorMin = Vector2.zero; fill.anchorMax = new Vector2(0.5f, 1f); fill.offsetMin = fill.offsetMax = Vector2.zero;
+                var val = UI.Text(row, "", TS.Readout, Tok.SkyDeep, TextAlignmentOptions.Right); val.fontSize = 12; UI.LE(val, 56, -1);
+                showBars.Add((fill, val));
+            }
+            showCaps = UI.Text(card.transform, "", TS.Caption, Tok.InkMuted, TextAlignmentOptions.Center, true);
+            showAct = FButton.Make(card.transform, "FLYING", BK.Primary, PlaneAction, 46);
+        }
+
+        void BrowsePlane(int dir)
+        {
+            hangarView = Mathf.Clamp(hangarView + dir, 0, Prog.Planes.Length - 1);
+            if (showSpring) showSpring.Punch(1.5f);
+            RefreshFleet();
+        }
+
+        void PlaneAction()
+        {
+            var d = Save.D; int v = hangarView; var pd = Prog.Planes[v];
+            if (v == d.plane) return;
+            if (!Prog.Owns(v))
+            {
+                if (!Prog.CanBuyPlane(v) || d.coins < pd.price) return;
+                d.coins -= pd.price; d.planesOwned |= 1 << v;
+                Toast($"NEW AIRCRAFT · {pd.name}", "Added to your fleet and ready to fly.");
+            }
+            d.plane = v; Save.Write(); Sfx.I.Power(); game.ApplyPlane();
+            if (showSpring) showSpring.Punch(3f);
+            RefreshHangar();
+        }
+
+        void RefreshFleet()
+        {
+            var d = Save.D; int v = hangarView; var pd = Prog.Planes[v];
+            bool owned = Prog.Owns(v), next = Prog.CanBuyPlane(v);
+            showPlane.sprite = Art.PlaneArt(v);
+            showPlane.color = owned || next ? Color.white : new Color(0.16f, 0.18f, 0.22f, 0.9f); // silhouette until it's next in line
+            showName.text = $"{pd.name}  {v + 1}/{Prog.Planes.Length}";
+            showBlurb.text = pd.blurb;
+            int cap = 0; foreach (var c in pd.cap) cap = Mathf.Max(cap, c);
+            SetBar(0, (pd.speed - 0.6f) / 0.7f, $"x{pd.speed:0.00}");
+            SetBar(1, (1f / pd.burn - 0.5f) / 0.85f, $"{100f / pd.burn:0}%");
+            SetBar(2, (pd.coin - 0.6f) / 0.8f, $"x{pd.coin:0.00}");
+            int hs = Prog.Cap(Up.HeadStart, pd);
+            showCaps.text = $"Upgrades up to Lv {cap} · Coins up to x{Prog.CoinMult(Prog.Cap(Up.Coin, pd), pd):0.00}\n" +
+                            $"Magnet {Prog.MagnetTime(Prog.Cap(Up.Magnet, pd), pd):0.0}s · Shield {Prog.ShieldTime(Prog.Cap(Up.Shield, pd), pd):0.0}s · Head start {(hs == 0 ? "none" : N(Prog.HeadStartMiles(hs, pd)) + " mi")}";
+            if (v == d.plane) { showAct.SetText("FLYING"); showAct.Interactable = false; }
+            else if (owned) { showAct.SetText("FLY THIS PLANE"); showAct.Interactable = true; }
+            else if (next) { showAct.SetText($"BUY · {N(pd.price)} COINS"); showAct.Interactable = d.coins >= pd.price; }
+            else { showAct.SetText($"LOCKED · BUY {Prog.Planes[v - 1].name} FIRST"); showAct.Interactable = false; }
+            showPrev.Interactable = v > 0; showNext.Interactable = v < Prog.Planes.Length - 1;
+        }
+
+        void SetBar(int i, float k, string val)
+        {
+            showBars[i].fill.anchorMax = new Vector2(Mathf.Clamp(k, 0.04f, 1f), 1f);
+            showBars[i].val.text = val;
         }
 
         void UpgradeCard(Transform col, int i)
@@ -585,11 +670,12 @@ namespace Flightline
             var right = UI.Rect(card.transform, "Right"); UI.V(right.gameObject, 6, null, TextAnchor.MiddleRight); UI.LE(right, 112, -1, 0).minWidth = 112;
             var eff = UI.Text(right, "", TS.Readout, Tok.SkyDeep, TextAlignmentOptions.Right); eff.fontSize = 12;
             var maxTag = UI.Tag(right, "MAXED", Tok.Go, Tok.OnGo);
+            var capTag = UI.Tag(right, "PLANE MAX", Tok.Caution, Tok.OnCaution);
             var buy = FButton.Make(right, "0", BK.Secondary, null, 44, Art.Picto("coin"));
             buy.onClick = () =>
             {
                 var d = Save.D; int lvl = d.upgrades[i]; int cost = Prog.Cost(i, lvl);
-                if (lvl >= def.max || d.coins < cost) return;
+                if (lvl >= Prog.Cap((Up)i) || d.coins < cost) return;
                 d.coins -= cost; d.upgrades[i]++;
                 foreach (var a in Prog.Check(null)) AchToast(a);
                 Save.Write(); Sfx.I.Power(); RefreshHangar();
@@ -597,15 +683,23 @@ namespace Flightline
             };
             hangarRefresh.Add(() =>
             {
-                var d = Save.D; int lvl = d.upgrades[i]; bool maxed = lvl >= def.max; int cost = maxed ? 0 : Prog.Cost(i, lvl);
-                eff.text = maxed ? def.effect(lvl) : $"{def.effect(lvl)} > {def.effect(lvl + 1)}";
-                for (int p = 0; p < pips.Count; p++) pips[p].Set(p < lvl ? Tok.Signal : Tok.Border);
-                maxTag.gameObject.SetActive(maxed); buy.gameObject.SetActive(!maxed);
+                // pips: lit = counts on this plane, muted = bought but beyond this plane's cap, faint = locked on this plane
+                var d = Save.D; int lvl = d.upgrades[i], cap = Prog.Cap((Up)i), on = Mathf.Min(lvl, cap);
+                bool maxed = lvl >= def.max, capped = !maxed && lvl >= cap; int cost = maxed || capped ? 0 : Prog.Cost(i, lvl);
+                eff.text = maxed || capped ? def.effect(on) : $"{def.effect(on)} > {def.effect(on + 1)}";
+                for (int p = 0; p < pips.Count; p++) pips[p].Set(p < on ? Tok.Signal : p < lvl ? Tok.InkMuted : p < cap ? Tok.Border : Tok.Surface);
+                maxTag.gameObject.SetActive(maxed); capTag.gameObject.SetActive(capped); buy.gameObject.SetActive(!maxed && !capped);
                 buy.SetText(N(cost)); buy.Interactable = d.coins >= cost;
             });
         }
 
-        void RefreshHangar() { hangarCoins.text = N(Save.D.coins); foreach (var a in hangarRefresh) a(); }
+        void RefreshHangar()
+        {
+            hangarCoins.text = N(Save.D.coins);
+            upTitle.text = $"UPGRADES · {Prog.Plane.name}";
+            RefreshFleet();
+            foreach (var a in hangarRefresh) a();
+        }
 
         // =========================================================== Logbook: rank, route map, achievements
         TextMeshProUGUI logRank, logRankXp, routeNext, routeName; Image logXpFill, routeLine;
@@ -754,7 +848,7 @@ namespace Flightline
 
         public void Go(RectTransform to, int dir)
         {
-            if (to == scrHangar) RefreshHangar();
+            if (to == scrHangar) { hangarView = Save.D.plane; RefreshHangar(); }
             if (to == scrLog) RefreshLog();
             if (to == scrTitle) RefreshTitle();
             if (to == scrMissions) RefreshMissionsScreen();

@@ -19,7 +19,7 @@ namespace Flightline
     }
 
     // All sprites are generated at runtime from signed distance fields. No imported art.
-    public static class Art
+    public static partial class Art
     {
         public delegate Color PixFn(Vector2 p, float px);
         static readonly Dictionary<string, Sprite> Cache = new Dictionary<string, Sprite>();
@@ -167,26 +167,6 @@ namespace Flightline
             return o.c;
         });
 
-        static readonly Vector2[] WingPts = { new Vector2(-0.95f, -0.08f), new Vector2(-0.1f, 0.32f), new Vector2(0.1f, 0.32f), new Vector2(0.95f, -0.08f), new Vector2(0.95f, -0.2f), new Vector2(0.1f, 0.02f), new Vector2(-0.1f, 0.02f), new Vector2(-0.95f, -0.2f) };
-        static readonly Vector2[] TailPts = { new Vector2(-0.36f, -0.8f), new Vector2(-0.05f, -0.56f), new Vector2(0.05f, -0.56f), new Vector2(0.36f, -0.8f), new Vector2(0.36f, -0.9f), new Vector2(-0.36f, -0.9f) };
-
-        public static Sprite Plane => Make("plane", 256, 256, 170, PlanePx);
-
-        static Color PlanePx(Vector2 p, float px)
-        {
-            Color body = CBody, wing = CWing, dark = CDark, sig = CSig;
-            var o = new Px(body);
-            float fus = Seg(p, new Vector2(0, -0.72f), new Vector2(0, 0.74f), 0.13f);
-            o.Add(wing, Cov(Poly(p, WingPts), px));
-            o.Add(dark, Cov(Box(p, new Vector2(-0.42f, 0.1f), new Vector2(0.06f, 0.13f), 0.05f), px));
-            o.Add(dark, Cov(Box(p, new Vector2(0.42f, 0.1f), new Vector2(0.06f, 0.13f), 0.05f), px));
-            o.Add(sig, Cov(Poly(p, TailPts), px));
-            o.Add(body, Cov(fus, px));
-            o.Add(G(0.62f, 0.25f), Cov(Mathf.Max(fus, -(p.x - 0.01f)), px));
-            o.Add(sig, Cov(Seg(p, new Vector2(0, -0.8f), new Vector2(0, -0.5f), 0.045f), px));
-            o.Add(dark, Cov(Seg(p, new Vector2(-0.04f, 0.6f), new Vector2(0.04f, 0.6f), 0.05f), px));
-            return o.c;
-        }
 
         // Crash debris: the plane cut along jagged break lines into wings, nose, centre section and tail.
         // Each piece pivots on its own centre (so it tumbles in place) and is scorched along the tear.
@@ -202,10 +182,10 @@ namespace Flightline
             return p.y > 0.14f + jy ? 2 : 3;
         }
 
-        public static Sprite PlanePiece(int i) => Make("planep" + i, 256, 256, 170, (p, px) =>
+        public static Sprite PlanePiece(int plane, int i) => Make("planep" + plane + "_" + i, 256, 256, 170, (p, px) =>
         {
             if (PieceOf(p) != i) return new Color(1, 1, 1, 0);
-            var c = PlanePx(p, px);
+            var c = FleetPx(plane, p, px);
             const float e = 0.035f;
             bool edge = PieceOf(p + new Vector2(e, 0)) != i || PieceOf(p - new Vector2(e, 0)) != i || PieceOf(p + new Vector2(0, e)) != i || PieceOf(p - new Vector2(0, e)) != i;
             if (edge) { float a = c.a; c = Color.Lerp(c, CChar, 0.75f); c.a = a; }

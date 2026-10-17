@@ -50,7 +50,7 @@ namespace Flightline
         bool lowFuelWarned;
 
         // ----- player -----
-        Transform plane, planeShadow; SpriteRenderer planeSr, shieldSr, magnetSr, shadowSr;
+        Transform plane, planeShadow, propT; SpriteRenderer planeSr, shieldSr, magnetSr, shadowSr, propSr; float planeSize = 1f; bool planeJet;
         float planeX, planeVX, targetX, planeAlt, planeTilt, surge, bank, bankV; bool dragging; float dragPointer0, dragPlane0;
         public const float PlaneY = -4.6f; const float PlaneR = 0.36f;
         const float SteerK = 560f, SteerZeta = 0.8f; // spring steering: stiffness and damping ratio (<1 = slight overshoot)
@@ -142,10 +142,23 @@ namespace Flightline
 
         void BuildPlane()
         {
-            shadowSr = SR(null, "PlaneShadow", Art.Plane, 7, new Color(0, 0, 0, 0.3f)); planeShadow = shadowSr.transform;
-            planeSr = SR(null, "Plane", Art.Plane, 10, Color.white); plane = planeSr.transform;
+            shadowSr = SR(null, "PlaneShadow", Art.PlaneArt(0), 7, new Color(0, 0, 0, 0.3f)); planeShadow = shadowSr.transform;
+            planeSr = SR(null, "Plane", Art.PlaneArt(0), 10, Color.white); plane = planeSr.transform;
+            propSr = SR(plane, "Prop", Art.Prop, 11, Color.white); propT = propSr.transform; propT.localScale = Vector3.one * 0.42f;
             shieldSr = SR(plane, "Shield", Art.Ring, 11, Color.white); shieldSr.transform.localScale = Vector3.one * 1.9f;
             magnetSr = SR(plane, "Magnet", Art.Ring, 9, Theme.Get(Tok.Signal, 0.6f)); magnetSr.transform.localScale = Vector3.one * 2.6f;
+        }
+
+        // Swap airframe: sprite, shadow, propeller, crash pieces and contrail sources.
+        public void ApplyPlane()
+        {
+            const float PxToLocal = 128f / 170f; // sprite space -> plane local units
+            int id = Mathf.Clamp(Save.D.plane, 0, Prog.Planes.Length - 1); var pd = Prog.Planes[id];
+            planeSr.sprite = shadowSr.sprite = Art.PlaneArt(id);
+            propSr.enabled = pd.propY > 0f; propT.localPosition = new Vector3(0, pd.propY * PxToLocal, 0);
+            for (int i = 0; i < debris.Length; i++) debris[i].sr.sprite = Art.PlanePiece(id, i);
+            var e = pd.engine * PxToLocal; TrailSrc[0] = new Vector3(-e.x, e.y, 0); TrailSrc[1] = new Vector3(e.x, e.y, 0);
+            planeJet = pd.jet; planeSize = pd.size;
         }
 
         // =========================================================== flow
@@ -153,7 +166,7 @@ namespace Flightline
         {
             state = GState.Menu; Time.timeScale = 1f; SetAwake(false); ClearEnts(); Theme.SetNight(false);
             planeX = targetX = 0; planeVX = 0; planeAlt = 0; takeoffT = 0; crashT = 0; crashRot = 0; speed = 0; shieldT = magnetT = boostT = invulnT = 0; headStart = false;
-            bank = bankV = planeTilt = 0; ClearTrails(); ResetBanks(); ResetDebris();
+            bank = bankV = planeTilt = 0; ClearTrails(); ResetBanks(); ResetDebris(); ApplyPlane();
             planeSr.enabled = true; shadowSr.enabled = true;
             runwayT.position = new Vector3(0, PlaneY + 8f - 16f, 0); runway.enabled = true;
             GameUI.I.ShowTitle();
@@ -169,7 +182,7 @@ namespace Flightline
             shieldT = magnetT = boostT = invulnT = 0; lowFuelWarned = false; achTimer = 0;
             nextRowAt = 26f; nextFuelAt = 45f; nextPowerAt = Random.Range(90f, 130f);
             ResetDirector(); Missions.EnsureToday(); paidZone = d.maxZone;
-            planeX = targetX = 0; planeVX = 0; dragging = false; planeAlt = 0; bank = bankV = planeTilt = 0; ClearTrails(); ResetBanks(); ResetDebris();
+            planeX = targetX = 0; planeVX = 0; dragging = false; planeAlt = 0; bank = bankV = planeTilt = 0; ClearTrails(); ResetBanks(); ResetDebris(); ApplyPlane();
             int hs = Prog.Lvl(Up.HeadStart); headStartMiles = Prog.HeadStartMiles(hs); headStart = hs > 0;
             planeSr.enabled = true; shadowSr.enabled = true; plane.rotation = Quaternion.identity;
             runwayT.position = new Vector3(0, PlaneY + 8f - 16f, 0); runway.enabled = true;
@@ -262,7 +275,7 @@ namespace Flightline
         {
             takeoffT += dt;
             HandleInput(dt);
-            float baseSp = CurTune().speed;
+            float baseSp = CurTune().speed * Prog.Plane.speed;
             bool burner = boostT > 0 || headStart;
             if (takeoffT < 1.6f) speed = baseSp * Mathf.Lerp(0.05f, 1f, Mathf.SmoothStep(0, 1, takeoffT / 1.6f));
             else speed = Mathf.MoveTowards(speed, baseSp * (burner ? 1.9f : 1f), dt * 7f);
@@ -303,11 +316,11 @@ namespace Flightline
             while (trailT > 0.016f)
             {
                 trailT -= 0.016f;
-                if (planeAlt < 0.6f && Random.value < 0.5f)
+                if (planeAlt < 0.6f && (planeJet || propSr.enabled) && Random.value < 0.5f)
                 {
                     var c = Theme.Get(Tok.RunwayWhite, 0.2f * (1f - planeAlt / 0.6f) * Mathf.Clamp01(speed / baseSp));
                     for (int side = -1; side <= 1; side += 2)
-                        Emit(plane.TransformPoint(new Vector3(side * 0.32f, -0.15f, 0)), new Vector2(Random.Range(-0.5f, 0.5f), -1.5f), c, 0.55f, 0.18f, 0.7f, true, -75, 3f, Art.Soft);
+                        Emit(plane.TransformPoint(new Vector3(side * (planeJet ? TrailSrc[1].x : 0.12f), -0.15f, 0)), new Vector2(Random.Range(-0.5f, 0.5f), -1.5f), c, 0.55f, 0.18f, 0.7f, true, -75, 3f, Art.Soft);
                 }
                 if (burner)
                 {
@@ -728,7 +741,8 @@ namespace Flightline
             surge = Mathf.Lerp(surge, burner ? 0.35f : 0f, 1f - Mathf.Exp(-3f * dt));
             // seen from above, pitching up through rotation and climb-out shortens the fuselage; banking narrows the wings
             float pitch = flying ? Mathf.Sin(Mathf.PI * Mathf.Clamp01((takeoffT - 0.55f) / 1.7f)) : 0f;
-            float sc = Mathf.Lerp(0.82f, 1f, planeAlt) * (1f + surge * 0.17f);
+            float sc = Mathf.Lerp(0.82f, 1f, planeAlt) * (1f + surge * 0.17f) * planeSize;
+            if (propSr.enabled) propT.Rotate(0f, 0f, -(700f + speed * 140f) * dt);
             float roll = Mathf.Cos((bank + n3 * 9f * air) * Mathf.Deg2Rad);
             plane.localScale = new Vector3(sc * roll, sc * (1f - 0.07f * pitch), 1);
             plane.position = new Vector3(planeX + n2 * 0.08f * air + jx, PlaneY + n1 * 0.18f * air + surge + jy, 0);
