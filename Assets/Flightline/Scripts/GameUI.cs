@@ -9,12 +9,6 @@ using UnityEngine.UI;
 
 namespace Flightline
 {
-    public static class Credits
-    {
-        public const string Author = "Pradhyuman";
-        public const string Line = "A game by Pradhyuman.";
-    }
-
     public class GameUI : MonoBehaviour
     {
         public static GameUI I;
@@ -79,15 +73,25 @@ namespace Flightline
             scrPause = BuildPause();
             scrOver = BuildOver();
             scrRate = BuildRateCard();
+            scrRevive = BuildRevive();
             popLayer = UI.Fill(UI.Rect(safeRt, "Pops"));
             toastLayer = UI.Fill(UI.Rect(safeRt, "Toasts"));
             BuildToast();
-            // boot: start on the splash colour and fade into the game, so the splash hands off without a flash
+            // boot: start on the splash picture (cropped to fill, as the splash draws it) and fade into the game, so the
+            // splash hands off without a jump
             var boot = UI.Img(root, "Boot", Tok.Fids, null, 1, 1, true); UI.Fill(boot.rectTransform, -50, -50, -50, -50);
+            var pic = Resources.Load<Texture2D>("Splash");
+            if (pic != null)
+            {
+                boot.color = new Color32(0x45, 0x9f, 0xe2, 0xff); // the splash's sky
+                var screen = UI.Fill(UI.Rect(boot.transform, "Screen"), 50, 50, 50, 50); // back to exactly the screen, as the splash crops to it
+                var ri = UI.Rect(screen, "Picture").gameObject.AddComponent<RawImage>(); ri.texture = pic; ri.raycastTarget = false;
+                var fit = ri.gameObject.AddComponent<AspectRatioFitter>(); fit.aspectMode = AspectRatioFitter.AspectMode.EnvelopeParent; fit.aspectRatio = (float)pic.width / pic.height;
+            }
             StartCoroutine(BootFade(boot));
         }
 
-        IEnumerator BootFade(Image boot)
+        IEnumerator BootFade(Graphic boot)
         {
             var cg = boot.gameObject.AddComponent<CanvasGroup>();
             yield return new WaitForSecondsRealtime(0.15f);
@@ -101,7 +105,7 @@ namespace Flightline
         {
             if (game.state == GState.Playing || game.state == GState.Paused || game.state == GState.Crashing) return;
             if (scrRate.gameObject.activeSelf) { scrRate.gameObject.SetActive(false); return; }
-            if (scrOver.gameObject.activeSelf) { game.ToMenu(); return; }
+            if (scrOver.gameObject.activeSelf) { Ads.AfterFlight(game.ToMenu); return; }
             if (current == scrHangar || current == scrLog || current == scrMissions) { Sfx.Click(); Go(scrTitle, -1); return; }
             if (current == scrTitle) Application.Quit();
         }
@@ -149,15 +153,19 @@ namespace Flightline
             var pic = UI.Pic(pb.transform, Art.Picto("pause"), 40); UI.Fill(pic.rectTransform, 4, 4, 4, 4);
             var btn = pb.gameObject.AddComponent<Button>(); btn.transition = Selectable.Transition.None; btn.onClick.AddListener(() => { Sfx.Click(); game.Pause(true); });
 
-            var gp = UI.Img(s, "Gauges", Tok.Asphalt, Art.RoundRect, UI.RPanel); UI.Anchor(gp.rectTransform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-16, -72), new Vector2(150, 0));
+            // Coin counter: bottom left.
+            var cp = UI.Img(s, "Coins", Tok.Asphalt, Art.RoundRect, UI.RPanel); UI.Anchor(cp.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(16, 16), Vector2.zero);
+            UI.H(cp.gameObject, 6, new RectOffset(12, 14, 8, 8)); UI.Fit(cp, true, true); UI.HudShadow(cp);
+            hudCoinIcon = UI.Pic(cp.transform, Art.Picto("coin"), 26).rectTransform; coinSpring = hudCoinIcon.gameObject.AddComponent<Springy>();
+            hudCoins = UI.Text(cp.transform, "0", TS.Readout, Tok.Signal);
+
+            // Fuel gauge: bottom right, with the active power-up timers stacked above it.
+            var gp = UI.Img(s, "Gauges", Tok.Asphalt, Art.RoundRect, UI.RPanel); UI.Anchor(gp.rectTransform, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-16, 16), new Vector2(150, 0));
             UI.V(gp.gameObject, 8, new RectOffset(12, 12, 10, 12)); UI.Fit(gp, false, true); UI.HudShadow(gp);
-            var cr = UI.Row(gp.transform, 6);
-            hudCoinIcon = UI.Pic(cr, Art.Picto("coin"), 20).rectTransform; coinSpring = hudCoinIcon.gameObject.AddComponent<Springy>();
-            hudCoins = UI.Text(cr, "0", TS.Readout, Tok.Signal); UI.LE(hudCoins, -1, -1, 1);
-            fuelG = Gauge.Make(gp.transform, "FUEL");
-            shieldG = Gauge.Make(gp.transform, "SHIELD");
-            magnetG = Gauge.Make(gp.transform, "MAGNET");
-            boostG = Gauge.Make(gp.transform, "BOOST");
+            shieldG = Gauge.Make(gp.transform, "SHIELD", Art.Picto("shield"));
+            magnetG = Gauge.Make(gp.transform, "MAGNET", Art.Picto("magnet"));
+            boostG = Gauge.Make(gp.transform, "BOOST", Art.Picto("boost"));
+            fuelG = Gauge.Make(gp.transform, "FUEL", Art.Picto("fuel"));
             return s;
         }
 
@@ -229,9 +237,6 @@ namespace Flightline
             var logo = UI.Img(head, "Logo", Tok.Asphalt, Art.RoundRect, UI.RPanel);
             var lvg = UI.V(logo.gameObject, 0, new RectOffset(22, 22, 8, 12), TextAnchor.UpperCenter); UI.HudShadow(logo);
             var t = UI.Text(logo.transform, "FLIGHTLINE", TS.DisplayXL, Tok.Signal, TextAlignmentOptions.Center); UI.LE(t, -1, 70);
-            UI.Text(logo.transform, "BY " + Credits.Author, TS.Label, Tok.InkInverseMuted, TextAlignmentOptions.Center);
-            var stk = UI.Sticker(logo.transform, 0.62f, -9f, false); stk.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
-            stk.anchorMin = stk.anchorMax = new Vector2(1, 0); stk.pivot = new Vector2(0.5f, 0.5f); stk.anchoredPosition = new Vector2(-36, 0);
             var best = UI.Img(head, "Best", Tok.Fids, Art.Pill, UI.PillM(32));
             UI.H(best.gameObject, 8, new RectOffset(14, 14, 7, 7)); UI.HudShadow(best);
             UI.Text(best.transform, "BEST", TS.Label, Tok.InkInverseMuted);
@@ -295,16 +300,23 @@ namespace Flightline
         {
             var s = MakeScreen("Pause"); Bg(s, Tok.Fids, 0.72f);
             var card = Card(s, 320);
-            UI.Text(card, "HOLDING PATTERN", TS.DisplayL, Tok.Ink);
+            CardTitle(card, "HOLDING PATTERN");
             UI.Text(card, "Your flight is paused. Take your time.", TS.Body, Tok.InkMuted, TextAlignmentOptions.Left, true);
-            UI.Text(card, Credits.Line, TS.Caption, Tok.InkMuted);
             FButton.Make(card, "RESUME", BK.Primary, () => game.Pause(false));
             soundBtn = FButton.Make(card, SoundLabel(), BK.Ghost, () => { Save.D.sound = !Save.D.sound; Save.Write(); soundBtn.SetText(SoundLabel()); });
             FButton.Make(card, "END FLIGHT", BK.Ghost, () => game.EndFromPause());
+            privacyBtn = FButton.Make(card, "PRIVACY CHOICES", BK.Ghost, Ads.ShowPrivacyOptions);
             return s;
         }
 
         string SoundLabel() => Save.D.sound ? "SOUND: ON" : "SOUND: OFF";
+
+        // Card headline: one line, shrinking to fit the card instead of running past its edge.
+        static TextMeshProUGUI CardTitle(Transform card, string s, float max = 22f)
+        {
+            var t = UI.Text(card, s, TS.DisplayL, Tok.Ink); t.enableAutoSizing = true; t.fontSizeMax = max; t.fontSizeMin = 12; t.fontSize = max;
+            return t;
+        }
 
         Transform Card(RectTransform parent, float width)
         {
@@ -319,15 +331,63 @@ namespace Flightline
         {
             var s = MakeScreen("Rate"); Bg(s, Tok.Fids, 0.72f);
             var card = Card(s, 330);
-            UI.Text(card, "A NOTE FROM " + Credits.Author.ToUpper(), TS.Label, Tok.InkMuted);
-            var ty = UI.Text(card, "THANKS FOR FLYING", TS.DisplayL, Tok.Ink); ty.enableAutoSizing = true; ty.fontSizeMax = ty.fontSize; ty.fontSizeMin = 18;
+            UI.Text(card, "A QUICK NOTE", TS.Label, Tok.InkMuted);
+            CardTitle(card, "THANKS FOR FLYING");
             UI.Text(card, "Flightline is my first game, and I made it on my own. An honest rating on Google Play helps other players find it, and your review tells me what to build next.", TS.Body, Tok.InkMuted, TextAlignmentOptions.Left, true);
             FButton.Make(card, "RATE ON GOOGLE PLAY", BK.Primary, () => { Review.OpenStore(); scrRate.gameObject.SetActive(false); });
             FButton.Make(card, "NOT NOW", BK.Ghost, () => scrRate.gameObject.SetActive(false));
             return s;
         }
 
-        public void ShowPause(bool on) { if (on) Overlay(scrPause); else scrPause.gameObject.SetActive(false); }
+        // =========================================================== Rewarded ads: keep flying, double coins
+        RectTransform scrRevive; Image reviveFill; FButton reviveWatch; bool reviveBusy; int reviveGen;
+        const float ReviveWait = 6f;
+
+        RectTransform BuildRevive()
+        {
+            var s = MakeScreen("Revive"); Bg(s, Tok.Fids, 0.72f);
+            var card = Card(s, 320);
+            CardTitle(card, "KEEP FLYING?");
+            UI.Text(card, "Watch a short ad to pick up where you went down, with the sky ahead cleared.", TS.Body, Tok.InkMuted, TextAlignmentOptions.Left, true);
+            var track = UI.Img(card, "Track", Tok.Border, Art.Pill, UI.PillM(8)); UI.LE(track, -1, 8);
+            reviveFill = UI.Img(track.transform, "Fill", Tok.Signal, Art.Pill, UI.PillM(8)); var fr = reviveFill.rectTransform; fr.anchorMin = Vector2.zero; fr.anchorMax = Vector2.one; fr.offsetMin = fr.offsetMax = Vector2.zero;
+            reviveWatch = FButton.Make(card, "WATCH AD", BK.Primary, () =>
+            {
+                if (reviveBusy) return; reviveBusy = true;
+                Ads.ShowRewarded(ok => { scrRevive.gameObject.SetActive(false); if (ok) game.Revive(); else game.DeclineRevive(); });
+            });
+            FButton.Make(card, "NO THANKS", BK.Ghost, () => { if (reviveBusy) return; scrRevive.gameObject.SetActive(false); game.DeclineRevive(); });
+            return s;
+        }
+
+        public void ShowRevive()
+        {
+            reviveBusy = false; Overlay(scrRevive);
+            StartCoroutine(ReviveCountdown(++reviveGen));
+        }
+
+        // The offer runs out on its own, so a player who looks away isn't left hanging mid-crash.
+        IEnumerator ReviveCountdown(int g)
+        {
+            float t = 0;
+            while (t < ReviveWait)
+            {
+                if (g != reviveGen || !scrRevive.gameObject.activeSelf) yield break;
+                if (!reviveBusy) t += Time.unscaledDeltaTime; // frozen while the ad plays
+                reviveFill.rectTransform.anchorMax = new Vector2(1f - t / ReviveWait, 1);
+                yield return null;
+            }
+            if (g == reviveGen && !reviveBusy && scrRevive.gameObject.activeSelf) { scrRevive.gameObject.SetActive(false); game.DeclineRevive(); }
+        }
+
+        public void OnRevive()
+        {
+            reviveGen++; scrRevive.gameObject.SetActive(false); scrHud.gameObject.SetActive(true);
+            Toast("BACK IN THE AIR", "Sky cleared. Fly on.");
+        }
+
+        FButton privacyBtn;
+        public void ShowPause(bool on) { if (on) { privacyBtn.gameObject.SetActive(Ads.PrivacyOptionsRequired); Overlay(scrPause); } else scrPause.gameObject.SetActive(false); }
 
         // =========================================================== Game over: boarding pass
         RectTransform BuildOver()
@@ -376,11 +436,29 @@ namespace Flightline
             var track = UI.Img(stats, "XpTrack", Tok.Border, Art.Pill, UI.PillM(8)); UI.LE(track, -1, 8);
             ovXpFill = UI.Img(track.transform, "Fill", Tok.SkyDeep, Art.Pill, UI.PillM(8)); var fr = ovXpFill.rectTransform; fr.anchorMin = Vector2.zero; fr.anchorMax = new Vector2(0.3f, 1); fr.offsetMin = fr.offsetMax = Vector2.zero;
 
-            FButton.Make(col, "PLAY AGAIN", BK.Primary, () => game.StartRun(), 56);
+            ovDouble = FButton.Make(col, "DOUBLE COINS · WATCH AD", BK.Secondary, DoubleCoins, 48, Art.Picto("coin"));
+            FButton.Make(col, "PLAY AGAIN", BK.Primary, () => Ads.AfterFlight(game.StartRun), 56);
             var row = UI.Row(col, 8, 48); row.GetComponent<HorizontalLayoutGroup>().childForceExpandWidth = true;
-            var hb = FButton.Make(row, "HANGAR", BK.GhostInverse, () => { game.ToMenu(); Go(scrHangar, 1); }, 48); UI.LE(hb, -1, -1, 1);
-            var mb = FButton.Make(row, "MENU", BK.GhostInverse, () => game.ToMenu(), 48); UI.LE(mb, -1, -1, 1);
+            var hb = FButton.Make(row, "HANGAR", BK.GhostInverse, () => Ads.AfterFlight(() => { game.ToMenu(); Go(scrHangar, 1); }), 48); UI.LE(hb, -1, -1, 1);
+            var mb = FButton.Make(row, "MENU", BK.GhostInverse, () => Ads.AfterFlight(game.ToMenu), 48); UI.LE(mb, -1, -1, 1);
             return s;
+        }
+
+        FButton ovDouble; int ovEarned; bool ovDoubling;
+
+        void DoubleCoins()
+        {
+            if (ovDoubling || ovEarned <= 0) return; ovDoubling = true;
+            int g = overGen, amount = ovEarned;
+            Ads.ShowRewarded(ok =>
+            {
+                ovDoubling = false;
+                if (!ok) return;
+                Save.D.coins += amount; Save.Write(); // the player watched for it: always paid, even if the screen moved on
+                if (g != overGen) return;
+                ovCoins.text = $"+{N(amount * 2)}"; ovDouble.gameObject.SetActive(false);
+                CoinBurst((RectTransform)ovDouble.transform, (RectTransform)ovCoins.transform, 10);
+            });
         }
 
         TextMeshProUGUI Stat(Transform row, string label)
@@ -392,7 +470,7 @@ namespace Flightline
 
         public void ShowGameOver(RunResult r)
         {
-            scrHud.gameObject.SetActive(false);
+            scrHud.gameObject.SetActive(false); scrRevive.gameObject.SetActive(false);
             var z = Prog.Zones[r.zone];
             ovFlight.text = "FL-" + r.flight;
             ovDest.text = z.code; ovDestName.text = z.name;
@@ -404,6 +482,8 @@ namespace Flightline
             ovMiles.text = N((long)r.miles);
             ovCoins.text = r.earned > r.coins ? $"+{N(r.earned)}" : $"+{N(r.coins)}";
             ovNear.text = N(r.near);
+            ovEarned = r.earned; ovDoubling = false;
+            ovDouble.gameObject.SetActive(r.earned > 0 && r.reason != "abort" && Ads.RewardedReady);
             var d = Save.D; int need = Prog.XpToNext(d.level);
             ovRank.text = $"{Prog.Rank(d.level)} · LV {d.level}";
             ovXp.text = $"+{N(r.xp)} XP";
@@ -422,10 +502,12 @@ namespace Flightline
         // =========================================================== shared: header + flying coins
         TextMeshProUGUI Header(Transform col, string title)
         {
+            // back | title (takes the space left over, shrinks if it must) | coin chip, each with its own room
             var h = UI.Row(col, 12, 52);
-            var b = FButton.Make(h, "BACK", BK.Ghost, () => Go(scrTitle, -1), 44); UI.LE(b, 104, 48);
-            var t = UI.Text(h, title, TS.DisplayL, Tok.Ink); UI.LE(t, -1, -1, 1);
-            var chip = UI.Img(h, "Coins", Tok.Asphalt, Art.Pill, UI.PillM(34)); UI.H(chip.gameObject, 6, new RectOffset(10, 14, 6, 6));
+            var b = FButton.Make(h, "BACK", BK.Ghost, () => Go(scrTitle, -1), 44); UI.LE(b, 88, 44);
+            var t = UI.Text(h, title, TS.DisplayL, Tok.Ink); UI.LE(t, 0, -1, 1);
+            t.enableAutoSizing = true; t.fontSizeMax = 20; t.fontSizeMin = 12; t.fontSize = 20;
+            var chip = UI.Img(h, "Coins", Tok.Asphalt, Art.Pill, UI.PillM(34)); UI.H(chip.gameObject, 6, new RectOffset(10, 14, 6, 6), TextAnchor.MiddleCenter); UI.LE(chip, -1, 34);
             chip.gameObject.AddComponent<Springy>();
             UI.Pic(chip.transform, Art.Glyph("coin"), 20);
             return UI.Text(chip.transform, "0", TS.Readout, Tok.Signal);
@@ -644,7 +726,7 @@ namespace Flightline
             if (v == d.plane) { showAct.SetText("FLYING"); showAct.Interactable = false; }
             else if (owned) { showAct.SetText("FLY THIS PLANE"); showAct.Interactable = true; }
             else if (next) { showAct.SetText($"BUY · {N(pd.price)} COINS"); showAct.Interactable = d.coins >= pd.price; }
-            else { showAct.SetText($"LOCKED · BUY {Prog.Planes[v - 1].name} FIRST"); showAct.Interactable = false; }
+            else { showAct.SetText("LOCKED"); showAct.Interactable = false; }
             showPrev.Interactable = v > 0; showNext.Interactable = v < Prog.Planes.Length - 1;
         }
 
@@ -702,7 +784,7 @@ namespace Flightline
         }
 
         // =========================================================== Logbook: rank, route map, achievements
-        TextMeshProUGUI logRank, logRankXp, routeNext, routeName; Image logXpFill, routeLine;
+        TextMeshProUGUI routeNext, routeName; Image routeLine;
         readonly List<(Image node, Themed nodeT, Themed codeT)> routeNodes = new List<(Image, Themed, Themed)>();
         RectTransform routePulse;
 
@@ -712,14 +794,8 @@ namespace Flightline
             var col = UI.Fill(UI.Rect(s, "Col"), 16, 16, 16, 16); UI.V(col.gameObject, 10);
             logCoins = Header(col, "LOGBOOK");
 
-            // pilot rank
-            var rank = UI.Img(col, "Rank", Tok.Asphalt, Art.RoundRect, UI.RPanel); UI.V(rank.gameObject, 6, new RectOffset(16, 16, 12, 14)); UI.HudShadow(rank);
-            var rr = UI.Row(rank.transform, 8);
-            logRank = UI.Text(rr, "CADET · LV 1", TS.Heading, Tok.InkInverse); UI.LE(logRank, -1, -1, 1);
-            logRankXp = UI.Text(rr, "", TS.Readout, Tok.Signal, TextAlignmentOptions.Right); logRankXp.fontSize = 12;
-            var xt = UI.Img(rank.transform, "Xp", Tok.Fids, Art.Pill, UI.PillM(8)); UI.LE(xt, -1, 8);
-            logXpFill = UI.Img(xt.transform, "Fill", Tok.Signal, Art.Pill, UI.PillM(8));
-            var xf = logXpFill.rectTransform; xf.anchorMin = Vector2.zero; xf.anchorMax = new Vector2(0.3f, 1); xf.offsetMin = xf.offsetMax = Vector2.zero;
+            // career totals
+            var rank = UI.Img(col, "Totals", Tok.Asphalt, Art.RoundRect, UI.RPanel); UI.V(rank.gameObject, 6, new RectOffset(16, 16, 12, 14)); UI.HudShadow(rank);
             var sr = UI.Row(rank.transform, 8); sr.GetComponent<HorizontalLayoutGroup>().childForceExpandWidth = true;
             logMiles = MiniStat(sr, "MILES"); logRuns = MiniStat(sr, "FLIGHTS"); logBest = MiniStat(sr, "BEST");
 
@@ -760,7 +836,7 @@ namespace Flightline
 
             // footer: rate + privacy
             var foot = UI.Row(col, 10, 44); foot.GetComponent<HorizontalLayoutGroup>().childForceExpandWidth = true;
-            var rate = FButton.Make(foot, "RATE FLIGHTLINE", BK.Secondary, Review.OpenStore, 44); UI.LE(rate, 0, 44, 1); rate.gameObject.SetActive(Review.HasStorePage);
+            var rate = FButton.Make(foot, "RATE US", BK.Secondary, Review.OpenStore, 44); UI.LE(rate, 0, 44, 1); rate.gameObject.SetActive(Review.HasStorePage);
             var priv = FButton.Make(foot, "PRIVACY", BK.Ghost, Review.OpenPrivacy, 44); UI.LE(priv, 0, 44, 1);
             return s;
         }
@@ -797,10 +873,6 @@ namespace Flightline
         {
             var d = Save.D;
             logCoins.text = N(d.coins); logMiles.text = N(d.totalMiles); logRuns.text = N(d.runs); logBest.text = N(d.bestScore);
-            int need = Prog.XpToNext(d.level);
-            logRank.text = $"{Prog.Rank(d.level)} · LV {d.level}";
-            logRankXp.text = $"{N(d.xp)}/{N(need)} XP";
-            logXpFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01((float)d.xp / need), 1);
             logCount.text = $"{d.ach.Count} / {Prog.Achs.Length}";
 
             int reached = Mathf.Clamp(d.maxZone, 0, Prog.Zones.Length - 1), next = reached + 1;
@@ -837,7 +909,7 @@ namespace Flightline
         public void OnRunStart()
         {
             FinishSlide(); overGen++;
-            foreach (var s in new[] { scrTitle, scrHangar, scrLog, scrMissions, scrOver, scrPause, scrRate }) { s.gameObject.SetActive(false); s.anchoredPosition = Vector2.zero; }
+            foreach (var s in new[] { scrTitle, scrHangar, scrLog, scrMissions, scrOver, scrPause, scrRate, scrRevive }) { s.gameObject.SetActive(false); s.anchoredPosition = Vector2.zero; }
             current = null; lastScore = -1; lastMiles = -1; lastMult = -1; lastCoins = -1;
             shieldTenths = magnetTenths = boostTenths = headMiles = -1;
             scrHud.gameObject.SetActive(true);

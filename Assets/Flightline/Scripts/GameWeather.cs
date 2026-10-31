@@ -24,6 +24,9 @@ namespace Flightline
             }
         }
 
+        static Material beamMat;
+        static Material BeamMat => beamMat != null ? beamMat : beamMat = new Material(LineMat) { name = "FL Beam", mainTexture = Art.BeamFrames[0] };
+
         static Material WindMat(bool right)
         {
             ref Material m = ref (right ? ref windMatR : ref windMatL);
@@ -76,32 +79,30 @@ namespace Flightline
             lr.SetPositions(buf);
         }
 
-        Color CellColor() => StormColor();
-
         // ---------------------------------------------------------------- create / init
         void CreateWeather(Ent e)
         {
             switch (e.kind)
             {
                 case Kind.Lightning:
-                    e.sr.sprite = Art.StormVol(1); e.sr.sortingOrder = 6; e.r = 0.5f; e.baseScale = 1f;
+                    e.sr.sprite = Art.CellIdleFrames[0]; e.sr.sortingOrder = 6; e.r = 0.5f; e.baseScale = 1f;
                     e.partSr = new SpriteRenderer[2];
                     e.partSr[0] = SR(e.t, "Charge", Art.Ring, 3, Color.clear);
                     e.partSr[1] = SR(e.t, "Flash", Art.Soft, 2, Color.clear);
-                    e.lines = new LineRenderer[8];
-                    for (int i = 0; i < 8; i++) e.lines[i] = Line(e.t, "Bolt", 12, i < 6 ? 0.1f : 0.05f, LineMat, i < 6 ? 10 : 6, Taper);
+                    e.lines = new LineRenderer[6]; // strike bolts out to the reach; the sheet does the cloud's own crackle and flash
+                    for (int i = 0; i < 6; i++) e.lines[i] = Line(e.t, "Bolt", 12, 0.1f, LineMat, 10, Taper);
                     e.fa = new float[6]; e.fb = new float[6];
                     break;
                 case Kind.Arc:
                     e.sr.sprite = null; e.r = 0f;
                     e.partSr = new SpriteRenderer[3];
-                    e.partSr[0] = SR(e.t, "NodeA", Art.StormVol(2), 7, Color.white);
-                    e.partSr[1] = SR(e.t, "NodeB", Art.StormVol(2), 7, Color.white);
+                    e.partSr[0] = SR(e.t, "NodeA", Art.ArcNodeFrames[0], 13, Color.white);
+                    e.partSr[1] = SR(e.t, "NodeB", Art.ArcNodeFrames[0], 13, Color.white); // mode 1: the spark at the arm's tip
                     e.partSr[2] = SR(e.t, "Halo", Art.Soft, 3, Color.clear);
-                    e.lines = new LineRenderer[3];
-                    e.lines[0] = Line(e.t, "Glow", 10, 0.38f, LineMat, 18, Even);
-                    e.lines[1] = Line(e.t, "Core", 12, 0.09f, LineMat, 18, Even);
-                    e.lines[2] = Line(e.t, "Fork", 11, 0.05f, LineMat, 18, Even);
+                    e.lines = new LineRenderer[1];
+                    e.lines[0] = Line(e.t, "Beam", 12, Art.BeamWidth, BeamMat, 18, Even);
+                    e.lines[0].textureMode = LineTextureMode.Tile; e.lines[0].numCapVertices = 0;
+                    e.lines[0].textureScale = new Vector2(Art.BeamBand / (64f * Art.BeamWidth), 1f); // the beam frame keeps its pixel aspect along the arc
                     break;
                 case Kind.Wind:
                     e.sr.sprite = null; e.r = 0f;
@@ -121,12 +122,12 @@ namespace Flightline
             switch (e.kind)
             {
                 case Kind.Lightning:
-                    e.sr.color = CellColor(); e.sr.flipX = Random.value < 0.5f; e.h = 1.6f; e.extent = e.h;
+                    e.sr.color = Color.white; e.sr.flipX = Random.value < 0.5f; e.h = 1.6f; e.extent = e.h;
                     e.partSr[0].color = Color.clear; e.partSr[1].color = Color.clear;
                     foreach (var l in e.lines) l.enabled = false;
                     break;
                 case Kind.Arc:
-                    foreach (var n in e.partSr) { n.transform.localScale = Vector3.one * 0.62f; n.color = CellColor(); n.enabled = true; }
+                    foreach (var n in e.partSr) { n.transform.localScale = Vector3.one; n.transform.localRotation = Quaternion.identity; n.color = Color.white; n.enabled = true; }
                     e.partSr[2].color = Color.clear; e.partSr[2].transform.localScale = Vector3.one * 2f;
                     foreach (var l in e.lines) l.enabled = true;
                     e.extent = 1.5f;
@@ -158,24 +159,23 @@ namespace Flightline
             if (state != GState.Playing && state != GState.Paused) windPush *= Mathf.Exp(-4f * dt);
             if (windMatR != null) windMatR.mainTextureOffset = new Vector2(-windScroll, 0);
             if (windMatL != null) windMatL.mainTextureOffset = new Vector2(windScroll, 0);
+            if (beamMat != null) { var bf = Art.BeamFrames; beamMat.mainTexture = bf[Art.SheetIndex(bf.Length, Time.time)]; }
         }
 
-        // Storm cell: drifts in, charges for 1 s (ring grows to its reach), then discharges branching bolts.
+        // Storm cell: drifts in grumbling, crackles while it charges for 1 s (ring grows to its reach), then bursts with
+        // branching bolts. The cloud itself is the cellidle / cellcharge / cellburst sheets.
         void UpdateCell(Ent e, Vector3 p, float dt, bool collide)
         {
             float R = e.h, Rk = CellReach(e), time = Time.time;
             var ring = e.partSr[0]; var flash = e.partSr[1];
-            float pscale = e.baseScale * (1f + Mathf.Sin(time * 1.4f + e.phase) * 0.05f);
-            e.t.localScale = Vector3.one * pscale;
-            e.t.localRotation = Quaternion.Euler(0, 0, Mathf.Sin(time * 0.8f + e.phase) * 5f);
+            float pscale = e.baseScale;
 
             if (!e.warned)
             {
                 // idle: faint ring at the exact strike reach, readable from far away
                 ring.color = Theme.Get(Tok.HudCaution, 0.14f + 0.06f * Mathf.Sin(time * 3f + e.phase));
                 ring.transform.localScale = Vector3.one * (Rk / 0.45f) / pscale;
-                // the cell grumbles: brief flickers of light inside it
-                e.sr.color = Random.value < dt * 1.5f ? Color.Lerp(CellColor(), StormLit, 0.6f) : CellColor();
+                e.sr.sprite = Art.SheetFrame(Art.CellIdleFrames, time + e.phase);
                 if (collide && p.y - PlaneY < Mathf.Max(speed, 6f) * 1.0f + 0.4f) { e.warned = true; e.t2 = 0; Sfx.I.Warn(); }
                 return;
             }
@@ -189,21 +189,15 @@ namespace Flightline
                 ring.transform.localScale = Vector3.one * (Rk / 0.45f) / pscale;
                 flash.color = Theme.Get(Tok.HudCaution, 0.45f * k);
                 flash.transform.localScale = Vector3.one * (2f * Mathf.Max(rr, 0.2f)) / pscale;
-                e.sr.color = Random.value < 0.18f * k ? Color.Lerp(CellColor(), Color.white, 0.55f) : CellColor();
-                for (int i = 6; i < 8; i++)
-                {
-                    var l = e.lines[i]; l.enabled = Random.value < 0.25f + 0.6f * k;
-                    if (!l.enabled) continue;
-                    float ang = Random.value * Mathf.PI * 2f; var d = new Vector3(Mathf.Cos(ang), Mathf.Sin(ang)) * rr * Random.Range(0.35f, 0.85f);
-                    Zap(l, p, p + d * 0.5f + (Vector3)(Random.insideUnitCircle * 0.25f), p + d, 0.1f);
-                    Tint(l, Theme.Get(Tok.HudCaution, 0.95f));
-                }
+                e.sr.sprite = Art.SheetFrame(Art.CellChargeFrames, e.t2);
                 if (k >= 1f) Discharge(e, p, collide);
                 return;
             }
 
-            // after the strike: bolts crackle briefly and fade, the spent cloud greys out
+            // after the strike: bolts crackle briefly and fade; the burst sheet plays once from its flash and holds the spent cloud
             e.t2 += dt;
+            var burst = Art.CellBurstFrames;
+            e.sr.sprite = burst[Mathf.Min(Art.CellBurstFrom + (int)(e.t2 * Art.SheetFps), burst.Length - 1)];
             float f = Mathf.Clamp01(1f - e.t2 / 0.45f);
             for (int i = 0; i < 6; i++)
             {
@@ -215,13 +209,10 @@ namespace Flightline
                 Zap(l, p, mid, end, 0.22f);
                 Tint(l, new Color(1, 1, 1, f));
             }
-            e.lines[6].enabled = e.lines[7].enabled = false;
             ring.color = Theme.Get(Tok.RunwayWhite, 0.8f * f);
             ring.transform.localScale = Vector3.one * (Rk * (1f + 0.3f * (1f - f)) / 0.45f) / pscale;
             flash.color = new Color(1, 1, 1, 0.6f * f * f);
             flash.transform.localScale = Vector3.one * Rk * 2.6f / pscale;
-            var spent = Theme.Get(Tok.Cloud); spent.a = 0.85f;
-            e.sr.color = Color.Lerp(spent, Color.white, f);
         }
 
         void Discharge(Ent e, Vector3 p, bool collide)
@@ -237,7 +228,7 @@ namespace Flightline
             else if (d < CellReach(e) + 1.1f) NearMiss(e);
         }
 
-        // Live arc: a curved crackling wire between two drifting nodes (mode 0), or a sweeping hand around a pivot (mode 1).
+        // Live arc: a curved laser beam between two drifting emitter clouds (mode 0), or a sweeping arm around one with a spark at its tip (mode 1).
         void UpdateArc(Ent e, Vector3 p, float dt, bool collide)
         {
             float time = Time.time;
@@ -255,17 +246,14 @@ namespace Flightline
             }
             e.partSr[0].transform.position = A;
             e.partSr[1].transform.position = B;
-            e.partSr[1].sprite = e.mode == 0 ? Art.StormVol(2) : Art.Soft;
-            if (e.mode == 1) { e.partSr[1].color = Theme.Get(Tok.HudCaution, 0.9f); e.partSr[1].transform.localScale = Vector3.one * (0.9f + Mathf.Sin(time * 18f) * 0.15f); }
-            e.partSr[0].transform.localRotation = Quaternion.Euler(0, 0, Mathf.Sin(time + e.phase) * 6f);
+            e.partSr[0].sprite = Art.SheetFrame(Art.ArcNodeFrames, time + e.phase);
+            e.partSr[1].sprite = e.mode == 0 ? Art.SheetFrame(Art.ArcNodeFrames, time + e.phase + 0.5f) : Art.SheetFrame(Art.ArcTipFrames, time + e.phase);
 
             var dir = B - A; var nrm = new Vector3(-dir.y, dir.x, 0).normalized;
             float sag = Mathf.Sin(time * 1.7f + e.phase) * (e.mode == 0 ? 0.4f : 0.2f);
             var ctrl = (A + B) * 0.5f + nrm * sag;
             float flick = 0.75f + 0.25f * Mathf.Sin(time * 37f + e.phase);
-            Zap(e.lines[0], A, ctrl, B, 0.1f); Tint(e.lines[0], Theme.Get(Tok.Stop, 0.3f * flick));
-            Zap(e.lines[1], A, ctrl, B, 0.14f); Tint(e.lines[1], new Color(1, 1, 1, 0.95f));
-            Zap(e.lines[2], A, ctrl + nrm * 0.15f, B, 0.24f); Tint(e.lines[2], Theme.Get(Tok.HudCaution, 0.7f * flick));
+            Zap(e.lines[0], A, ctrl, B, 0f); Tint(e.lines[0], Color.white); // the beam sheet carries the crackle
             e.partSr[2].transform.position = (A + B) * 0.5f; e.partSr[2].color = Theme.Get(Tok.Stop, 0.12f * flick);
             e.partSr[2].transform.localScale = new Vector3(dir.magnitude * 1.3f, 1.4f, 1);
             e.partSr[2].transform.rotation = Quaternion.Euler(0, 0, Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg);

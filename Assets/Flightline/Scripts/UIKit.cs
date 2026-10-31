@@ -31,10 +31,10 @@ namespace Flightline
 
     public static class UI
     {
-        public const float RMd = 2f;   // radius-md 6px with the 12px rounded sprite
-        public const float RSm = 6f;   // radius-sm 2px
-        public static float PillM(float h) => 62f / h;
-        public const float RPanel = 1.2f; // ~10px corners for panels: softer than signage-square
+        // Arcade frames (Art.Frame): one texel = Texel UI units on every panel and button.
+        public const float Texel = 3f;
+        public const float RMd = 1f / Texel, RSm = 1f / Texel, RPanel = 1f / Texel;
+        public static float PillM(float h) => Mathf.Max(1f / Texel, 10f / h); // thin bars use smaller texels so both ends fit
 
         // One tap = one action: swallows a second click (same or another button) fired within a short window,
         // e.g. a double-tap on PLAY AGAIN, or a tap on the outgoing screen while a slide is still running.
@@ -95,21 +95,25 @@ namespace Flightline
             return t;
         }
 
+        const string Arcade = "PressStart2P-Regular", Pixel = "PixelifySans";
+
         public static void Style(TextMeshProUGUI t, TS s)
         {
             switch (s)
             {
-                case TS.DisplayXL: Set(t, "BarlowCondensed-ExtraBold", 72, -1, true); t.lineSpacing = -18; break;
-                case TS.DisplayL: Set(t, "BarlowCondensed-Bold", 48, 0, true); t.lineSpacing = -14; break;
-                case TS.Heading: Set(t, "BarlowCondensed-Bold", 28, 0, false); break;
-                case TS.Button: Set(t, "BarlowCondensed-Bold", 20, 4, true); break;
-                case TS.Title: Set(t, "B612-Bold", 18, 0, false); break;
-                case TS.Body: Set(t, "B612-Regular", 16, 0, false); break;
-                case TS.Caption: Set(t, "B612-Regular", 13, 0, false); break;
-                case TS.Label: Set(t, "B612-Bold", 12, 8, true); break;
-                case TS.HudScore: Set(t, "B612Mono-Bold", 40, 0, false); break;
-                case TS.Flap: Set(t, "B612Mono-Bold", 22, 0, true); break;
-                case TS.Readout: Set(t, "B612Mono-Regular", 14, 0, false); break;
+                // Arcade type: Press Start 2P (square, monospaced: titles, buttons, numbers that tick) over Pixelify Sans (reading text).
+                // Press Start glyphs are a full em wide, so its sizes sit well below what a condensed face would use.
+                case TS.DisplayXL: Set(t, Arcade, 30, 0, true); t.lineSpacing = 10; break;
+                case TS.DisplayL: Set(t, Arcade, 22, 0, true); t.lineSpacing = 10; break;
+                case TS.Heading: Set(t, Arcade, 16, 0, false); break;
+                case TS.Button: Set(t, Arcade, 13, 0, true); break;
+                case TS.Title: Set(t, Pixel, 19, 0, false); break;
+                case TS.Body: Set(t, Pixel, 17, 0, false); break;
+                case TS.Caption: Set(t, Pixel, 14, 0, false); break;
+                case TS.Label: Set(t, Pixel, 13, 2, true); break;
+                case TS.HudScore: Set(t, Arcade, 24, 0, false); break;
+                case TS.Flap: Set(t, Arcade, 16, 0, true); break;
+                case TS.Readout: Set(t, Pixel, 16, 0, false); break;
             }
         }
 
@@ -155,34 +159,9 @@ namespace Flightline
         }
         public static RectTransform Spacer(Transform parent) { var r = Rect(parent, "Spacer"); LE(r, 0, 0, 1); return r; }
 
-        // "NO ADS" die-cut sticker: fixed colours (a physical sticker looks the same day or night).
-        public static readonly Color StickerGreen = new Color32(0x18, 0x79, 0x4a, 0xff);
-        public static RectTransform Sticker(Transform parent, float scale = 1f, float angle = -8f, bool sub = true)
-        {
-            float w = sub ? 150f : 128f, h = sub ? 62f : 46f;
-            var root = Rect(parent, "Sticker"); root.sizeDelta = new Vector2(w, h) * scale; root.localRotation = Quaternion.Euler(0, 0, angle);
-            Image P(string n, Color c, Vector2 size, Vector2 off)
-            {
-                var r = Rect(root, n); r.anchorMin = r.anchorMax = new Vector2(0.5f, 0.5f); r.sizeDelta = size * scale; r.anchoredPosition = off * scale;
-                var i = r.gameObject.AddComponent<Image>(); i.sprite = Art.Pill; i.type = Image.Type.Sliced; i.pixelsPerUnitMultiplier = PillM(size.y * scale);
-                i.color = c; i.raycastTarget = false; return i;
-            }
-            void T(string s, string font, float size, Color c, float y, float spacing)
-            {
-                var r = Rect(root, "T"); r.anchorMin = r.anchorMax = new Vector2(0.5f, 0.5f); r.sizeDelta = new Vector2(w, size * 1.3f) * scale; r.anchoredPosition = new Vector2(0, y) * scale;
-                var t = r.gameObject.AddComponent<TextMeshProUGUI>(); t.font = Fonts.Get(font); t.fontSize = size * scale; t.color = c; t.characterSpacing = spacing;
-                t.alignment = TextAlignmentOptions.Center; t.textWrappingMode = TextWrappingModes.NoWrap; t.raycastTarget = false; t.text = s;
-            }
-            P("Shade", new Color(0, 0, 0, 0.3f), new Vector2(w, h), new Vector2(0, -3));
-            P("Edge", Color.white, new Vector2(w, h), Vector2.zero);
-            P("Face", StickerGreen, new Vector2(w - 9, h - 9), Vector2.zero);
-            T("NO ADS", "BarlowCondensed-ExtraBold", 31, Color.white, sub ? 6 : 1, 2);
-            if (sub) T("PLAYS OFFLINE", "B612-Bold", 9.5f, new Color(1, 1, 1, 0.85f), -15, 14);
-            return root;
-        }
-
-        public static void HudShadow(Component c) { var s = c.gameObject.AddComponent<Shadow>(); s.effectColor = new Color(0, 0, 0, Theme.Night ? 0.5f : 0.25f); s.effectDistance = new Vector2(0, -2); }
-        public static void CardShadow(Component c) { var s = c.gameObject.AddComponent<Shadow>(); s.effectColor = new Color(0.07f, 0.09f, 0.13f, 0.16f); s.effectDistance = new Vector2(0, -6); }
+        // Hard drop shadows, offset by whole texels: arcade cabinets don't blur.
+        public static void HudShadow(Component c) { var s = c.gameObject.AddComponent<Shadow>(); s.effectColor = new Color(0, 0, 0, 0.45f); s.effectDistance = new Vector2(Texel, -Texel); }
+        public static void CardShadow(Component c) { var s = c.gameObject.AddComponent<Shadow>(); s.effectColor = new Color(0, 0, 0, 0.4f); s.effectDistance = new Vector2(Texel * 2, -Texel * 2); }
 
         // FIDS status word on a light ground (filled tag).
         public static Image Tag(Transform parent, string word, Tok fill, Tok text)
@@ -199,7 +178,7 @@ namespace Flightline
             H(img.gameObject, 10, new RectOffset(12, 12, 12, 12));
             if (!right) Pic(img.transform, Art.Picto("arrowL"), 32);
             var tile = Img(img.transform, "Code", Tok.Signal, Art.RoundRect, RSm); LE(tile, 34, 30);
-            var tt = Text(tile.transform, gate, TS.Flap, Tok.OnSignal, TextAlignmentOptions.Center); tt.fontSize = 18; Fill(tt.rectTransform);
+            var tt = Text(tile.transform, gate, TS.Flap, Tok.OnSignal, TextAlignmentOptions.Center); tt.fontSize = 14; Fill(tt.rectTransform);
             var t = Text(img.transform, label, TS.Button, Tok.InkInverse); LE(t, -1, -1, 1);
             if (right) Pic(img.transform, Art.Picto("arrowR"), 32);
             var b = img.gameObject.AddComponent<Button>(); b.transition = Selectable.Transition.None;
@@ -252,9 +231,11 @@ namespace Flightline
             b.faceRt = b.face.rectTransform; b.faceRt.anchorMin = new Vector2(0, 1); b.faceRt.anchorMax = new Vector2(1, 1); b.faceRt.pivot = new Vector2(0.5f, 1);
             b.faceRt.anchoredPosition = Vector2.zero; b.faceRt.sizeDelta = new Vector2(0, height);
             if (kind == BK.Ghost || kind == BK.GhostInverse) { b.outline = UI.Img(b.faceRt, "Outline", Tok.BorderStrong, Art.RoundOutline, UI.RMd); UI.Fill(b.outline.rectTransform); }
-            var row = UI.Rect(b.faceRt, "Row"); UI.Fill(row, 16, 0, 16, 0); UI.H(row.gameObject, 8, null, TextAnchor.MiddleCenter);
+            bool iconOnly = string.IsNullOrEmpty(text) && icon != null; // arrows: the icon sits dead centre, no label space
+            var row = UI.Rect(b.faceRt, "Row"); UI.Fill(row, iconOnly ? 0 : 16, 0, iconOnly ? 0 : 16, 0); UI.H(row.gameObject, 8, null, TextAnchor.MiddleCenter);
             if (icon != null) UI.Pic(row, icon, 24);
             b.label = UI.Text(row, text, TS.Button, Tok.OnSignal, TextAlignmentOptions.Center);
+            if (iconOnly) b.label.gameObject.SetActive(false);
             b.button = r.gameObject.AddComponent<Button>(); b.button.transition = Selectable.Transition.None; b.button.targetGraphic = b.face;
             var nav = b.button.navigation; nav.mode = Navigation.Mode.None; b.button.navigation = nav;
             b.button.onClick.AddListener(() => { if (!UI.ClickGate()) return; Sfx.Click(); b.onClick?.Invoke(); });
@@ -312,7 +293,7 @@ namespace Flightline
             for (int i = 0; i < len; i++)
             {
                 var tile = UI.Img(r, "Tile", Tok.Fids, Art.RoundRect, UI.RSm); tile.rectTransform.sizeDelta = new Vector2(w, h);
-                var t = UI.Text(tile.transform, " ", TS.Flap, tok, TextAlignmentOptions.Center); UI.Fill(t.rectTransform); t.fontSize = h * 0.68f;
+                var t = UI.Text(tile.transform, " ", TS.Flap, tok, TextAlignmentOptions.Center); UI.Fill(t.rectTransform); t.fontSize = h * 0.5f;
                 var hinge = UI.Img(tile.transform, "Hinge", Tok.FlapSplit); var hr = hinge.rectTransform;
                 hr.anchorMin = new Vector2(0, 0.5f); hr.anchorMax = new Vector2(1, 0.5f); hr.sizeDelta = new Vector2(0, 1.5f); hr.anchoredPosition = Vector2.zero;
                 f.tiles.Add(tile.rectTransform); f.chars.Add(t);
@@ -350,10 +331,11 @@ namespace Flightline
     {
         public RectTransform root; TextMeshProUGUI word; Image fill; Themed wordT, fillT; TextMeshProUGUI label; float shown = -1f, appliedFill = -1f; string appliedWord; bool fillOn = true, wordOn = true;
 
-        public static Gauge Make(Transform parent, string label)
+        public static Gauge Make(Transform parent, string label, Sprite icon = null)
         {
             var g = new Gauge(); g.root = UI.Rect(parent, "Gauge " + label); UI.V(g.root.gameObject, 4);
             var row = UI.Row(g.root, 4);
+            if (icon != null) UI.Pic(row, icon, 18);
             g.label = UI.Text(row, label, TS.Label, Tok.InkInverseMuted); UI.LE(g.label, -1, -1, 1);
             g.word = UI.Text(row, "", TS.Label, Tok.HudGo, TextAlignmentOptions.Right); g.wordT = g.word.GetComponent<Themed>();
             var track = UI.Img(g.root, "Track", Tok.Fids, Art.Pill, UI.PillM(8)); UI.LE(track, -1, 8);

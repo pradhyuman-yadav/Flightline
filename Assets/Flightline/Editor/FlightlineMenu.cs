@@ -12,6 +12,11 @@ namespace Flightline.EditorTools
         const string Scene = "Assets/Flightline/Scenes/Flightline.unity";
         const string OutDir = "Builds/Android";
         public const string Version = "1.0.0";
+        // Studio identity, shared by the Android and iOS builds. The app ID is permanent once the game is on a store.
+        public const string Company = "OpenCircuit Games";
+        public const string AppId = "com.opencircuitgames.flightline";
+        // Apple Developer Team ID (10 characters, developer.apple.com > Account > Membership details). Empty: pick the team in Xcode.
+        public const string AppleTeamId = "";
 
         [MenuItem("Flightline/Open Game Scene")]
         static void OpenScene() => EditorSceneManager.OpenScene(Scene);
@@ -21,9 +26,9 @@ namespace Flightline.EditorTools
         public static void ApplyAndroidSettings()
         {
             var t = UnityEditor.Build.NamedBuildTarget.Android;
-            PlayerSettings.companyName = "Pradhyuman";
+            PlayerSettings.companyName = Company;
             PlayerSettings.productName = "Flightline";
-            PlayerSettings.SetApplicationIdentifier(t, "com.pradhyuman.flightline");
+            PlayerSettings.SetApplicationIdentifier(t, AppId);
             PlayerSettings.bundleVersion = Version;
             if (PlayerSettings.Android.bundleVersionCode < 1) PlayerSettings.Android.bundleVersionCode = 1;
 
@@ -43,7 +48,8 @@ namespace Flightline.EditorTools
             PlayerSettings.SetManagedStrippingLevel(t, ManagedStrippingLevel.Low);
             PlayerSettings.stripEngineCode = true;
             EditorUserBuildSettings.development = false;
-            { // no hardware stats; the app is fully offline (no public API for this in Unity 6)
+            PlayerSettings.Android.forceInternetPermission = true; // AdMob loads ads over the network
+            { // no Unity hardware stats (no public API for this in Unity 6)
                 var pso = new SerializedObject(Unsupported.GetSerializedAssetInterfaceSingleton("PlayerSettings"));
                 var sa = pso.FindProperty("submitAnalytics"); if (sa != null) { sa.boolValue = false; pso.ApplyModifiedPropertiesWithoutUndo(); }
             }
@@ -51,7 +57,7 @@ namespace Flightline.EditorTools
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(Scene, true) };
             Branding.ApplyToPlayerSettings();
             AssetDatabase.SaveAssets();
-            Debug.Log($"Flightline: release settings applied. v{PlayerSettings.bundleVersion} ({PlayerSettings.Android.bundleVersionCode}), com.pradhyuman.flightline, IL2CPP ARM64, API 26+ / target latest.");
+            Debug.Log($"Flightline: release settings applied. v{PlayerSettings.bundleVersion} ({PlayerSettings.Android.bundleVersionCode}), {AppId}, IL2CPP ARM64, API 26+ / target latest.");
         }
 
         // ---------------------------------------------------------------- Android: builds
@@ -138,10 +144,25 @@ namespace Flightline.EditorTools
             var tex = new Texture2D(w, h, TextureFormat.RGB24, false);
             var prevMode = canvas.renderMode; var prevCam = canvas.worldCamera; var prevDist = canvas.planeDistance;
             var prevTarget = cam.targetTexture; var prevActive = RenderTexture.active;
+            // Lay the UI out again for the canvas's current size. A layout rebuild only walks down through layout groups and
+            // the canvas root has none, so start at every group, parents first.
+            void Relayout()
+            {
+                var scaler = ui.GetComponent<UnityEngine.UI.CanvasScaler>();
+                if (scaler != null) typeof(UnityEngine.UI.CanvasScaler).GetMethod("Handle", BindingFlags.Instance | BindingFlags.NonPublic)?.Invoke(scaler, null);
+                Canvas.ForceUpdateCanvases();
+                var groups = ui.GetComponentsInChildren<UnityEngine.UI.LayoutGroup>();
+                for (int pass = 0; pass < 2; pass++)
+                    foreach (var g in groups) UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)g.transform);
+                foreach (var t in ui.GetComponentsInChildren<TMPro.TMP_Text>()) t.ForceMeshUpdate(true, true);
+                Canvas.ForceUpdateCanvases();
+            }
             try
             {
+                // point the camera at the capture first, so the canvas takes the capture's (phone) size, then lay out for it
+                cam.targetTexture = rt;
                 canvas.renderMode = RenderMode.ScreenSpaceCamera; canvas.worldCamera = cam; canvas.planeDistance = 5;
-                cam.targetTexture = rt; Canvas.ForceUpdateCanvases(); cam.Render();
+                Relayout(); cam.Render();
                 RenderTexture.active = rt;
                 tex.ReadPixels(new Rect(0, 0, w, h), 0, 0); tex.Apply();
                 File.WriteAllBytes(path, tex.EncodeToPNG());
@@ -151,6 +172,7 @@ namespace Flightline.EditorTools
                 // always hand the camera and canvas back exactly as they were, even if the write fails
                 RenderTexture.active = prevActive; cam.targetTexture = prevTarget;
                 canvas.renderMode = prevMode; canvas.worldCamera = prevCam; canvas.planeDistance = prevDist;
+                Relayout(); // back to the game view's own size
                 UnityEngine.Object.DestroyImmediate(rt); UnityEngine.Object.DestroyImmediate(tex);
             }
         }

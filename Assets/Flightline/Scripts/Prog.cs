@@ -23,7 +23,8 @@ namespace Flightline
         public int price, headStep;           // headStep: head-start miles per level
         public float speed, burn, coin;       // multipliers on zone speed and fuel burn; base coin value
         public float magnet, shield;          // base power-up seconds
-        public float size = 1f, propY = -1f;  // visual scale; propeller hub in sprite space (-1 = none)
+        public float size = 1f, propY = -1f;  // visual scale; > 0 for propeller planes (prop wash kicks up runway dust)
+        public string art;                    // pixel-art animation in Resources/Sheets
         public bool jet; public Vector2 engine; // contrail source (sprite space, mirrored) for jets
         public int[] cap;                     // max effective level per Up
     }
@@ -50,15 +51,15 @@ namespace Flightline
         // BUSH PLANE (index 5) is the original airframe: its stats reproduce the game exactly as it was.
         public static readonly PlaneDef[] Planes =
         {
-            new PlaneDef { name = "PAPER DART",      blurb = "Folded from a boarding pass. Slow, short range.",    price = 0,     speed = 0.75f, burn = 1.6f,  coin = 0.8f,  magnet = 4.0f, shield = 5.0f, headStep = 250, size = 0.85f, cap = new[] { 3, 3, 3, 3, 1 } },
-            new PlaneDef { name = "BALSA GLIDER",    blurb = "Light wood, long wings. Rides the air a little longer.", price = 750, speed = 0.8f, burn = 1.45f, coin = 0.85f, magnet = 4.2f, shield = 5.2f, headStep = 275, size = 0.95f, cap = new[] { 4, 4, 4, 4, 2 } },
-            new PlaneDef { name = "RC TRAINER",      blurb = "Electric motor, spinning prop. Your first engine.",  price = 2000,  speed = 0.85f, burn = 1.3f,  coin = 0.9f,  magnet = 4.4f, shield = 5.4f, headStep = 300, size = 0.88f, propY = 0.86f, cap = new[] { 5, 5, 5, 5, 3 } },
-            new PlaneDef { name = "BIPLANE",         blurb = "Two wings each side. Fabric, wire and nerve.",       price = 4500,  speed = 0.9f,  burn = 1.2f,  coin = 0.92f, magnet = 4.6f, shield = 5.6f, headStep = 325, size = 0.95f, propY = 0.86f, cap = new[] { 6, 6, 6, 6, 4 } },
-            new PlaneDef { name = "PROP FIGHTER",    blurb = "Wartime piston fighter. Elliptical wings, big prop.", price = 9000, speed = 0.95f, burn = 1.1f,  coin = 0.96f, magnet = 4.8f, shield = 5.8f, headStep = 350, propY = 0.9f,  cap = new[] { 8, 8, 8, 8, 6 } },
-            new PlaneDef { name = "BUSH PLANE",      blurb = "High wing, honest and tough. Goes anywhere.",        price = 16000, speed = 1.0f,  burn = 1.0f,  coin = 1.0f,  magnet = 5.0f, shield = 6.0f, headStep = 400, propY = 0.86f, cap = new[] { 10, 10, 10, 10, 8 } },
-            new PlaneDef { name = "BIZ JET",         blurb = "Swept wings, tail engines, leather seats.",          price = 28000, speed = 1.08f, burn = 0.92f, coin = 1.1f,  magnet = 5.4f, shield = 6.4f, headStep = 450, jet = true, engine = new Vector2(0.2f, -0.66f), cap = new[] { 10, 10, 10, 10, 8 } },
-            new PlaneDef { name = "JUMBO JET",       blurb = "Four engines, two decks, enormous tanks.",           price = 45000, speed = 1.12f, burn = 0.8f,  coin = 1.2f,  magnet = 5.8f, shield = 6.8f, headStep = 500, size = 1.15f, jet = true, engine = new Vector2(0.4f, -0.1f), cap = new[] { 10, 10, 10, 10, 8 } },
-            new PlaneDef { name = "STEALTH FIGHTER", blurb = "Faceted, twin-tailed, very fast. Top of the fleet.", price = 75000, speed = 1.22f, burn = 0.85f, coin = 1.3f,  magnet = 6.2f, shield = 7.2f, headStep = 600, size = 1.05f, jet = true, engine = new Vector2(0.12f, -0.78f), cap = new[] { 10, 10, 10, 10, 8 } },
+            new PlaneDef { name = "PAPER DART",      blurb = "Folded from a boarding pass. Slow, short range.",    price = 0,     speed = 0.75f, burn = 1.6f,  coin = 0.8f,  magnet = 4.0f, shield = 5.0f, headStep = 250, size = 0.85f, art = "paper", cap = new[] { 3, 3, 3, 3, 1 } },
+            new PlaneDef { name = "BALSA GLIDER",    blurb = "Light wood, long wings. Rides the air a little longer.", price = 750, speed = 0.8f, burn = 1.45f, coin = 0.85f, magnet = 4.2f, shield = 5.2f, headStep = 275, size = 0.95f, art = "balsa", cap = new[] { 4, 4, 4, 4, 2 } },
+            new PlaneDef { name = "RC TRAINER",      blurb = "Electric motor, spinning prop. Your first engine.",  price = 2000,  speed = 0.85f, burn = 1.3f,  coin = 0.9f,  magnet = 4.4f, shield = 5.4f, headStep = 300, size = 0.88f, propY = 0.86f, art = "rc", cap = new[] { 5, 5, 5, 5, 3 } },
+            new PlaneDef { name = "BIPLANE",         blurb = "Two wings each side. Fabric, wire and nerve.",       price = 4500,  speed = 0.9f,  burn = 1.2f,  coin = 0.92f, magnet = 4.6f, shield = 5.6f, headStep = 325, size = 0.95f, propY = 0.86f, art = "biplane", cap = new[] { 6, 6, 6, 6, 4 } },
+            new PlaneDef { name = "PROP FIGHTER",    blurb = "Wartime piston fighter. Elliptical wings, big prop.", price = 9000, speed = 0.95f, burn = 1.1f,  coin = 0.96f, magnet = 4.8f, shield = 5.8f, headStep = 350, propY = 0.9f,  art = "fighter", cap = new[] { 8, 8, 8, 8, 6 } },
+            new PlaneDef { name = "BUSH PLANE",      blurb = "High wing, honest and tough. Goes anywhere.",        price = 16000, speed = 1.0f,  burn = 1.0f,  coin = 1.0f,  magnet = 5.0f, shield = 6.0f, headStep = 400, propY = 0.86f, art = "bush", cap = new[] { 10, 10, 10, 10, 8 } },
+            new PlaneDef { name = "BIZ JET",         blurb = "Swept wings, tail engines, leather seats.",          price = 28000, speed = 1.08f, burn = 0.92f, coin = 1.1f,  magnet = 5.4f, shield = 6.4f, headStep = 450, jet = true, engine = new Vector2(0.27f, -0.5f), art = "bizjet", cap = new[] { 10, 10, 10, 10, 8 } },
+            new PlaneDef { name = "JUMBO JET",       blurb = "Four engines, two decks, enormous tanks.",           price = 45000, speed = 1.12f, burn = 0.8f,  coin = 1.2f,  magnet = 5.8f, shield = 6.8f, headStep = 500, size = 1.15f, jet = true, engine = new Vector2(0.41f, -0.16f), art = "jumbo", cap = new[] { 10, 10, 10, 10, 8 } },
+            new PlaneDef { name = "STEALTH FIGHTER", blurb = "Faceted, twin-tailed, very fast. Top of the fleet.", price = 75000, speed = 1.22f, burn = 0.85f, coin = 1.3f,  magnet = 6.2f, shield = 7.2f, headStep = 600, size = 1.05f, jet = true, engine = new Vector2(0.16f, -0.56f), art = "stealth", cap = new[] { 10, 10, 10, 10, 8 } },
         };
 
         public static PlaneDef Plane => Planes[Mathf.Clamp(Save.D.plane, 0, Planes.Length - 1)];

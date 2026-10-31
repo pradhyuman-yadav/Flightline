@@ -16,8 +16,8 @@ namespace Flightline
         {
             for (int i = 0; i < banks.Length; i++)
             {
-                var b = new Bank { body = SR(world, "CloudBank", Art.CloudVol(i), 1, Color.white) };
-                b.veil = SR(b.body.transform, "Veil", Art.CloudVol(i), 12, Color.clear);
+                var b = new Bank { body = SR(world, "CloudBank", Art.CloudFrames[0], 1, Color.white) };
+                b.veil = SR(b.body.transform, "Veil", Art.CloudFrames[0], 12, Color.clear);
                 b.body.enabled = b.veil.enabled = false; banks[i] = b;
             }
             fog = SR(null, "CloudFog", Art.Vignette, 40, Color.clear); fog.enabled = false;
@@ -48,16 +48,18 @@ namespace Flightline
             }
             float target = 0f; var pp = plane.position;
             bool inAir = state == GState.Playing || state == GState.Crashing;
-            foreach (var b in banks)
+            for (int i = 0; i < banks.Length; i++)
             {
+                var b = banks[i];
                 if (!b.on) continue;
+                b.body.sprite = b.veil.sprite = Art.SheetFrame(Art.CloudFrames, Time.time + i * 0.9f);
                 var t = b.body.transform; var p = t.position;
                 p.y -= speed * 1.05f * dt; p.x += windPush * 0.25f * dt; // at our altitude, riding the same wind
                 t.position = p;
                 float s = t.localScale.y;
                 if (p.y < camY - halfH - 1.2f * s) { b.on = false; b.body.enabled = b.veil.enabled = false; continue; }
                 // immersion: a soft ellipse around the cloud's dense core
-                float ex = (pp.x - p.x) / (1.25f * s), ey = (pp.y - p.y) / (0.72f * s);
+                float ex = (pp.x - p.x) / (1.0f * s), ey = (pp.y - p.y) / (0.95f * s); // the cloud sheet is about round
                 float k = inAir ? 1f - Mathf.SmoothStep(0f, 1f, (Mathf.Sqrt(ex * ex + ey * ey) - 0.45f) / 0.55f) : 0f;
                 target = Mathf.Max(target, k);
                 var c = cloudC; c.a = 0.95f; b.body.color = c;

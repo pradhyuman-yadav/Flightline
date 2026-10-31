@@ -27,7 +27,7 @@ namespace Flightline
         void Explode()
         {
             Vector3 c = plane.position; var rot = plane.rotation; float sc = plane.localScale.y;
-            planeSr.enabled = shadowSr.enabled = shieldSr.enabled = magnetSr.enabled = propSr.enabled = false;
+            planeSr.enabled = shadowSr.enabled = shieldSr.enabled = magnetSr.enabled = false;
 
             Emit(c, Vector2.zero, new Color(1f, 0.98f, 0.88f, 1f), 0.22f, 0.6f, 3.4f, true, 23, 0f, Art.Soft, new Color(1f, 0.75f, 0.3f, 1f)); // flash
             Emit(c, Vector2.zero, new Color(1f, 1f, 1f, 0.75f), 0.4f, 0.5f, 4f, true, 22, 0f, Art.Ring); // shock ring
@@ -49,7 +49,7 @@ namespace Flightline
             for (int i = 0; i < debris.Length; i++)
             {
                 var d = debris[i]; var t = d.sr.transform;
-                t.SetPositionAndRotation(plane.TransformPoint(Art.PieceCenter[i] * (128f / 170f)), rot); // sprite p-space -> plane local units
+                t.SetPositionAndRotation(plane.TransformPoint(Art.PieceCenter[i] * 0.75f), rot); // sprite -1..1 space -> plane local units
                 t.localScale = Vector3.one * sc; d.s0 = sc;
                 var dir = ((Vector2)(rot * (Vector3)PieceDir[i])).normalized;
                 d.v = dir * Random.Range(1.4f, 2.8f) + Random.insideUnitCircle * 0.4f + new Vector2(planeVX * 0.25f, 0f);

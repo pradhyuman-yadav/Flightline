@@ -114,7 +114,7 @@ namespace Flightline
             float y0 = SpawnY - (travel - nextRowAt);
             rowHaz.Clear();
             float extent;
-            if (zone + 1 < Prog.Zones.Length && gateForZone < zone + 1 && miles + (y0 - PlaneY) * 10f >= Prog.Zones[zone + 1].start - 40f)
+            if (zone + 1 < Prog.Zones.Length && gateForZone < zone + 1 && miles + (y0 - PlaneHomeY) * 10f >= Prog.Zones[zone + 1].start - 40f)
             {
                 gateForZone = zone + 1; curChunk = "gate"; extent = GateChunk(y0);
             }
@@ -316,6 +316,15 @@ namespace Flightline
                 float cx = Mathf.Clamp(x + Mathf.Sin(ph + i * k) * curve * Mathf.Min(1f, i / 2f), -PlayHalfW + 0.5f, PlayHalfW - 0.5f);
                 Spawn(Kind.Coin, cx, y + i * 0.75f);
             }
+        }
+
+        // Run start: a coin trail that starts just above the screen, so it flies in about 3.5 s into the takeoff
+        // (14 units of travel), straight at first and then swinging side to side.
+        void OpeningCoins()
+        {
+            float y = halfH + 14f, sd = Random.value < 0.5f ? -1f : 1f;
+            for (int i = 0; i < 14; i++)
+                Spawn(Kind.Coin, sd * Mathf.Sin(Mathf.Max(0, i - 3) * 0.45f) * (PlayHalfW * 0.45f), y + i * 0.75f);
         }
 
         void CoinRing(float cx, float cy, float r, int n) { for (int i = 0; i < n; i++) { float a = i * Mathf.PI * 2f / n; Spawn(Kind.Coin, cx + Mathf.Cos(a) * r, cy + Mathf.Sin(a) * r); } }

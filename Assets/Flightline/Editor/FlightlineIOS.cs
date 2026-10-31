@@ -15,9 +15,9 @@ namespace Flightline.EditorTools
         public static void ApplyIosSettings()
         {
             var t = UnityEditor.Build.NamedBuildTarget.iOS;
-            PlayerSettings.companyName = "Pradhyuman";
+            PlayerSettings.companyName = FlightlineMenu.Company;
             PlayerSettings.productName = "Flightline";
-            PlayerSettings.SetApplicationIdentifier(t, "com.pradhyuman.flightline");
+            PlayerSettings.SetApplicationIdentifier(t, FlightlineMenu.AppId);
             PlayerSettings.bundleVersion = FlightlineMenu.Version;
             if (!int.TryParse(PlayerSettings.iOS.buildNumber, out var b) || b < 1) PlayerSettings.iOS.buildNumber = "1";
 
@@ -29,7 +29,8 @@ namespace Flightline.EditorTools
             PlayerSettings.iOS.hideHomeButton = false;
             PlayerSettings.iOS.deferSystemGesturesMode = UnityEngine.iOS.SystemGestureDeferMode.BottomEdge; // a swipe up mid-flight needs a second swipe
             PlayerSettings.statusBarHidden = true;
-            PlayerSettings.iOS.appleEnableAutomaticSigning = true;           // pick your Team in Xcode or set the Team ID here
+            PlayerSettings.iOS.appleEnableAutomaticSigning = true;           // Xcode makes and renews the certificates and profiles
+            if (FlightlineMenu.AppleTeamId != "") PlayerSettings.iOS.appleDeveloperTeamID = FlightlineMenu.AppleTeamId;
             PlayerSettings.SetScriptingBackend(t, ScriptingImplementation.IL2CPP);
             PlayerSettings.SetArchitecture(t, 1);                            // ARM64
             PlayerSettings.SetManagedStrippingLevel(t, ManagedStrippingLevel.Low);
@@ -86,6 +87,29 @@ namespace Flightline.EditorTools
             var plist = new UnityEditor.iOS.Xcode.PlistDocument(); plist.ReadFromFile(plistPath);
             plist.root.SetBoolean("ITSAppUsesNonExemptEncryption", false);
             plist.WriteToFile(plistPath);
+        }
+
+        // Runs between the resolver writing the Podfile (order 40) and running pod install (order 50):
+        // - AdMob's dependency list names the old git specs repo as a pod source; CocoaPods would clone all of it (several
+        //   GB) first. The CDN source the resolver also writes has the same pods, so the git one goes.
+        // - Google's pods declare iOS 12, below what current Xcode accepts; build every pod for the app's own iOS version.
+        [PostProcessBuild(45)]
+        public static void FixPodfile(BuildTarget target, string path)
+        {
+            if (target != BuildTarget.iOS) return;
+            var podfile = Path.Combine(path, "Podfile"); if (!File.Exists(podfile)) return;
+            var lines = new System.Collections.Generic.List<string>(File.ReadAllLines(podfile));
+            lines.RemoveAll(l => l.Contains("github.com/CocoaPods/Specs"));
+            if (!lines.Exists(l => l.Contains("post_install")))
+            {
+                string ios = PlayerSettings.iOS.targetOSVersionString;
+                lines.Add("post_install do |installer|");
+                lines.Add("  installer.pods_project.targets.each do |t|");
+                lines.Add($"    t.build_configurations.each {{ |c| c.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '{ios}' }}");
+                lines.Add("  end");
+                lines.Add("end");
+            }
+            File.WriteAllLines(podfile, lines);
         }
 #endif
     }
