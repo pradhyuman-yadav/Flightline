@@ -37,6 +37,10 @@ namespace Flightline
         public int rateCardShown;
         public long rateCardLast;
         public string homePort = "";
+        // fleet
+        public int plane;
+        public int planesOwned = 1; // bitmask over Prog.Planes
+        public int planeVer;
     }
 
     public static class Save
@@ -71,6 +75,22 @@ namespace Flightline
             if (d.missionDay == null) d.missionDay = "";
             if (d.lastStreakDay == null) d.lastStreakDay = "";
             if (d.homePort == null) d.homePort = "";
+            if (d.planeVer < 1)
+            {
+                // Saves from before the fleet flew the original airframe (BUSH PLANE): keep them on it, with everything below.
+                bool veteran = d.runs > 0 || d.totalCoins > 0;
+                foreach (var u in d.upgrades) veteran |= u > 0;
+                if (veteran) { d.planesOwned = (1 << 6) - 1; d.plane = 5; }
+                else { d.planesOwned = 1; d.plane = 0; }
+            }
+            else if (d.planeVer < 2)
+            {
+                // Test builds opened the whole fleet: hand back only the starter. Coins and upgrades stay as saved.
+                d.planesOwned = 1; d.plane = 0;
+            }
+            d.planeVer = 2;
+            d.planesOwned |= 1;
+            if (d.plane < 0 || d.plane >= Prog.Planes.Length || (d.planesOwned & (1 << d.plane)) == 0) d.plane = 0;
         }
 
         static SaveData Parse(string s)

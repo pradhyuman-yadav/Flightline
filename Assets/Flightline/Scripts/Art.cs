@@ -18,8 +18,9 @@ namespace Flightline
         }
     }
 
-    // All sprites are generated at runtime from signed distance fields. No imported art.
-    public static class Art
+    // UI, sky and effect sprites are generated at runtime from signed distance fields. Airframes, pickups and hazards are
+    // imported pixel art (ArtSheets.cs).
+    public static partial class Art
     {
         public delegate Color PixFn(Vector2 p, float px);
         static readonly Dictionary<string, Sprite> Cache = new Dictionary<string, Sprite>();
@@ -84,18 +85,42 @@ namespace Flightline
 
         // ---------- UI shapes ----------
         public static Sprite White => Make("white", 4, 4, 4, (p, px) => Wt);
-        public static Sprite RoundRect => Make("rr", 64, 64, 100, (p, px) => G(1, Cov(Box(p, Vector2.zero, new Vector2(0.99f, 0.99f), 0.375f), px)), null, new Vector4(16, 16, 16, 16));
-        public static Sprite RoundTop => Make("rrtop", 64, 64, 100, (p, px) =>
+        // Arcade frames: pixel art drawn texel by texel, point-filtered and 9-sliced. The white body takes the tint; the
+        // near-black rim and the darker bottom lip survive any tint, so every panel and button reads as a chunky block.
+        // UI.RMd / RSm / RPanel / PillM keep one texel the same size on screen everywhere.
+        public static Sprite RoundRect => Frame("rr", 12, 4, 2, true, true, true);
+        public static Sprite RoundTop => Frame("rrtop", 12, 4, 2, true, false, false);
+        public static Sprite RoundOutline => Frame("rro", 12, 4, 2, false, true, false);
+        public static Sprite Pill => Frame("pill", 12, 5, 3, true, true, true);
+
+        static readonly Color Rim = new Color(0.08f, 0.09f, 0.11f, 1f), Lip = new Color(0.7f, 0.7f, 0.72f, 1f);
+
+        // n x n texels, sliced at `border`; corners stepped to radius r. body: filled (else rim only); bottom: rounded and
+        // rimmed at the bottom too (a header's bottom runs on into the panel below it); lip: two shaded rows along the bottom.
+        static Sprite Frame(string key, int n, int border, int r, bool body, bool bottom, bool lip)
         {
-            float d = p.y > 0 ? Box(p, Vector2.zero, new Vector2(0.99f, 0.99f), 0.375f) : Box(p, Vector2.zero, new Vector2(0.99f, 0.99f));
-            return G(1, Cov(d, px));
-        }, null, new Vector4(16, 16, 16, 16));
-        public static Sprite RoundOutline => Make("rro", 64, 64, 100, (p, px) =>
-        {
-            float d = Box(p, Vector2.zero, new Vector2(0.99f, 0.99f), 0.375f);
-            return G(1, Cov(Mathf.Abs(d + 0.0625f) - 0.0625f, px));
-        }, null, new Vector4(16, 16, 16, 16));
-        public static Sprite Pill => Make("pill", 64, 64, 100, (p, px) => G(1, Cov(Circ(p, Vector2.zero, 0.98f), px)), null, new Vector4(31, 31, 31, 31));
+            if (Cache.TryGetValue(key, out var s) && s != null) return s;
+            bool In(int x, int y)
+            {
+                if (x < 0 || y < 0 || x >= n || y >= n) return !bottom && y < 0 && x >= 0 && x < n;
+                int dx = Mathf.Min(x, n - 1 - x), dy = bottom ? Mathf.Min(y, n - 1 - y) : n - 1 - y;
+                if (dx >= r || dy >= r) return true;
+                float ex = r - dx - 0.5f, ey = r - dy - 0.5f; return ex * ex + ey * ey <= r * r;
+            }
+            var pix = new Color[n * n];
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    if (!In(x, y)) continue;
+                    bool rim = !In(x - 1, y) || !In(x + 1, y) || !In(x, y - 1) || !In(x, y + 1);
+                    pix[y * n + x] = rim ? Rim : !body ? Color.clear : lip && y <= 2 ? Lip : Wt;
+                }
+            var tex = new Texture2D(n, n, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Point, name = key };
+            tex.SetPixels(pix); tex.Apply(false, true);
+            s = Sprite.Create(tex, new Rect(0, 0, n, n), new Vector2(0.5f, 0.5f), 100, 0, SpriteMeshType.FullRect, new Vector4(border, border, border, border));
+            s.name = key; Cache[key] = s;
+            return s;
+        }
         public static Sprite Dash => Make("dash", 8, 4, 100, (p, px) => G(1, p.x < 0 ? 1 : 0));
 
         // Repeating soft dash used to animate wind streamlines (LineRenderer, Tile mode).
@@ -118,6 +143,25 @@ namespace Flightline
             }
         }
 
+        // Soft cross-section for contrail ribbons: dense core, feathered edges (v runs across the ribbon).
+        static Texture2D vapourTex;
+        public static Texture2D Vapour
+        {
+            get
+            {
+                if (vapourTex != null) return vapourTex;
+                vapourTex = new Texture2D(4, 32, TextureFormat.RGBA32, false) { wrapMode = TextureWrapMode.Clamp, filterMode = FilterMode.Bilinear, name = "vapour" };
+                var px = new Color[4 * 32];
+                for (int y = 0; y < 32; y++)
+                {
+                    float v = (y + 0.5f) / 16f - 1f, a = Mathf.Clamp01(1f - v * v);
+                    for (int x = 0; x < 4; x++) px[y * 4 + x] = new Color(1, 1, 1, a * a);
+                }
+                vapourTex.SetPixels(px); vapourTex.Apply(false, true);
+                return vapourTex;
+            }
+        }
+
         // ---------- World ----------
         public static Sprite Circle => Make("circle", 64, 64, 64, (p, px) => G(1, Cov(p.magnitude - 0.96f, px)));
         public static Sprite Soft => Make("soft", 64, 64, 64, (p, px) => { float a = Mathf.Clamp01(1f - p.magnitude); return G(1, a * a); });
@@ -136,122 +180,11 @@ namespace Flightline
             return G(1, Mathf.Sin(Mathf.PI * v) * Mathf.Clamp01(1f - u));
         });
 
-        public static Sprite Coin => Make("coin", 128, 128, 206, (p, px) =>
+        // Screen-edge mist while flying through cloud: clear centre, foggy rim.
+        public static Sprite Vignette => Make("vignette", 64, 128, 64, (p, px) =>
         {
-            Color sig = CSig, dk = CSigDk, deep = CDeep;
-            var o = new Px(sig); float r = p.magnitude;
-            o.Add(deep, Cov(r - 0.96f, px));
-            o.Add(sig, Cov(r - 0.84f, px));
-            o.Add(dk, Cov(Mathf.Abs(r - 0.64f) - 0.05f, px));
-            o.Add(dk, Cov(Seg(p, new Vector2(0, -0.3f), new Vector2(0, 0.3f), 0.1f), px));
-            o.Add(G(1, 0.6f), Cov(Seg(p, new Vector2(-0.5f, 0.2f), new Vector2(-0.28f, 0.48f), 0.06f), px));
-            return o.c;
-        });
-
-        static readonly Vector2[] WingPts = { new Vector2(-0.95f, -0.08f), new Vector2(-0.1f, 0.32f), new Vector2(0.1f, 0.32f), new Vector2(0.95f, -0.08f), new Vector2(0.95f, -0.2f), new Vector2(0.1f, 0.02f), new Vector2(-0.1f, 0.02f), new Vector2(-0.95f, -0.2f) };
-        static readonly Vector2[] TailPts = { new Vector2(-0.36f, -0.8f), new Vector2(-0.05f, -0.56f), new Vector2(0.05f, -0.56f), new Vector2(0.36f, -0.8f), new Vector2(0.36f, -0.9f), new Vector2(-0.36f, -0.9f) };
-
-        public static Sprite Plane => Make("plane", 256, 256, 170, (p, px) =>
-        {
-            Color body = CBody, wing = CWing, dark = CDark, sig = CSig;
-            var o = new Px(body);
-            float fus = Seg(p, new Vector2(0, -0.72f), new Vector2(0, 0.74f), 0.13f);
-            o.Add(wing, Cov(Poly(p, WingPts), px));
-            o.Add(dark, Cov(Box(p, new Vector2(-0.42f, 0.1f), new Vector2(0.06f, 0.13f), 0.05f), px));
-            o.Add(dark, Cov(Box(p, new Vector2(0.42f, 0.1f), new Vector2(0.06f, 0.13f), 0.05f), px));
-            o.Add(sig, Cov(Poly(p, TailPts), px));
-            o.Add(body, Cov(fus, px));
-            o.Add(G(0.62f, 0.25f), Cov(Mathf.Max(fus, -(p.x - 0.01f)), px));
-            o.Add(sig, Cov(Seg(p, new Vector2(0, -0.8f), new Vector2(0, -0.5f), 0.045f), px));
-            o.Add(dark, Cov(Seg(p, new Vector2(-0.04f, 0.6f), new Vector2(0.04f, 0.6f), 0.05f), px));
-            return o.c;
-        });
-
-        static float CloudSdf(Vector2 p)
-        {
-            float d = Circ(p, new Vector2(-0.95f, -0.25f), 0.42f);
-            d = SMin(d, Circ(p, new Vector2(-0.4f, 0.08f), 0.6f), 0.15f);
-            d = SMin(d, Circ(p, new Vector2(0.3f, 0.18f), 0.58f), 0.15f);
-            d = SMin(d, Circ(p, new Vector2(0.9f, -0.18f), 0.45f), 0.15f);
-            d = SMin(d, Box(p, new Vector2(0, -0.45f), new Vector2(1.05f, 0.3f), 0.3f), 0.15f);
-            return d;
-        }
-
-        public static Sprite Cloud => Make("cloud", 256, 160, 85, (p, px) =>
-        {
-            float sh = Mathf.Lerp(0.86f, 1f, Mathf.Clamp01((p.y + 0.7f) / 1.3f));
-            return G(sh, Cov(CloudSdf(p), px * 7f));
-        });
-
-        public static Sprite Storm => Make("storm", 256, 160, 142, (p, px) =>
-        {
-            float d = CloudSdf(p);
-            float sh = Mathf.Lerp(0.7f, 1f, Mathf.Clamp01((p.y + 0.6f) / 1.3f));
-            var o = new Px(G(sh));
-            o.Add(G(sh), Cov(d, px * 1.5f));
-            o.Add(G(0.62f), Cov(Mathf.Max(d + 0.12f, -(d + 0.04f)), px) * 0.0f);
-            return o.c;
-        });
-
-        static readonly Vector2[] BoltPts = { new Vector2(0.12f, 0.95f), new Vector2(-0.34f, 0.0f), new Vector2(-0.02f, 0.0f), new Vector2(-0.18f, -0.95f), new Vector2(0.36f, 0.14f), new Vector2(0.04f, 0.14f), new Vector2(0.3f, 0.95f) };
-        public static Sprite Bolt => Make("bolt", 64, 128, 160, (p, px) => G(1, Cov(Poly(p, BoltPts), px)));
-
-        static readonly Vector2[] NeckPts = { new Vector2(-0.4f, -0.05f), new Vector2(0.4f, -0.05f), new Vector2(0.08f, -0.32f), new Vector2(-0.08f, -0.32f) };
-        public static Sprite Balloon => Make("balloon", 128, 192, 128, (p, px) =>
-        {
-            var o = new Px(G(0.85f));
-            o.Add(G(0.55f), Cov(Seg(p, new Vector2(0, -0.3f), new Vector2(0, -0.72f), 0.02f), px));
-            o.Add(G(0.5f), Cov(Box(p, new Vector2(0, -0.84f), new Vector2(0.12f, 0.09f), 0.03f), px));
-            float bd = Mathf.Min(Circ(p, new Vector2(0, 0.3f), 0.6f), Poly(p, NeckPts));
-            o.Add(G(0.85f), Cov(bd, px));
-            float stripe = Mathf.Abs(Mathf.Abs(p.x) - 0.24f) - 0.05f;
-            o.Add(G(0.7f), Cov(Mathf.Max(bd + 0.02f, stripe), px));
-            o.Add(Wt, Cov(Circ(p, new Vector2(-0.24f, 0.55f), 0.12f), px * 4f));
-            return o.c;
-        }, new Vector2(0.5f, 0.65f));
-
-        public static Sprite Drone => Make("drone", 160, 160, 133, (p, px) =>
-        {
-            var o = new Px(G(0.85f)); var arm = G(0.55f);
-            o.Add(arm, Cov(Seg(p, new Vector2(-0.62f, -0.62f), new Vector2(0.62f, 0.62f), 0.07f), px));
-            o.Add(arm, Cov(Seg(p, new Vector2(-0.62f, 0.62f), new Vector2(0.62f, -0.62f), 0.07f), px));
-            for (int i = 0; i < 4; i++)
-            {
-                var c = new Vector2(i % 2 == 0 ? -0.62f : 0.62f, i < 2 ? -0.62f : 0.62f);
-                o.Add(G(0.95f, 0.45f), Cov(Circ(p, c, 0.3f), px));
-                o.Add(arm, Cov(Mathf.Abs(Circ(p, c, 0.3f)) - 0.025f, px));
-            }
-            o.Add(G(0.85f), Cov(Box(p, Vector2.zero, new Vector2(0.24f, 0.24f), 0.08f), px));
-            o.Add(G(0.25f), Cov(Circ(p, new Vector2(0, 0.06f), 0.08f), px));
-            return o.c;
-        });
-
-        public static Sprite Fuel => Make("fuel", 128, 160, 160, (p, px) =>
-        {
-            var o = new Px(Wt);
-            float body = Box(p, new Vector2(0, -0.12f), new Vector2(0.62f, 0.8f), 0.16f);
-            float handle = Mathf.Max(Box(p, new Vector2(-0.12f, 0.76f), new Vector2(0.36f, 0.16f), 0.08f), -Box(p, new Vector2(-0.12f, 0.74f), new Vector2(0.22f, 0.06f), 0.04f));
-            float spout = Seg(p, new Vector2(0.36f, 0.7f), new Vector2(0.55f, 0.9f), 0.08f);
-            o.Add(G(0.8f), Cov(Mathf.Min(handle, spout), px));
-            o.Add(Wt, Cov(body, px));
-            float x1 = Seg(p, new Vector2(-0.4f, -0.7f), new Vector2(0.4f, 0.46f), 0.06f), x2 = Seg(p, new Vector2(-0.4f, 0.46f), new Vector2(0.4f, -0.7f), 0.06f);
-            o.Add(G(0.75f), Cov(Mathf.Min(x1, x2), px));
-            return o.c;
-        });
-
-        public static Sprite Runway => Make("runway", 256, 2048, 64, (p, px) =>
-        {
-            float u = p.x / 0.125f * 2f;          // -2..2 units across
-            float v = (p.y * 0.5f + 0.5f) * 32f;  // 0..32 units along
-            var asph = CDark; float n = Hash(p) * 0.04f;
-            var o = new Px(asph);
-            o.Add(new Color(asph.r + n, asph.g + n, asph.b + n, 1f), 1f);
-            var w = Wt;
-            if (Mathf.Abs(Mathf.Abs(u) - 1.75f) < 0.05f) o.Add(w, 0.9f);
-            if (Mathf.Abs(u) < 0.06f && v > 3.5f && v < 28.5f && Mathf.Repeat(v, 2f) < 1.1f) o.Add(w, 0.9f);
-            bool thr = (v > 0.6f && v < 2.4f) || (v > 29.6f && v < 31.4f);
-            if (thr && Mathf.Abs(u) < 1.55f && Mathf.Abs(u) > 0.2f && Mathf.Repeat(u + 1.6f, 0.4f) < 0.22f) o.Add(w, 0.95f);
-            return o.c;
+            float r = new Vector2(p.x * 2f, p.y).magnitude;
+            return G(1, Mathf.SmoothStep(0f, 1f, (r - 0.45f) / 0.9f));
         });
 
         // ---------- Pictograms: asphalt tile + one glyph (signal for actions, ink-inverse for objects) ----------
@@ -262,11 +195,25 @@ namespace Flightline
         static float Arrow(Vector2 p) => Mathf.Min(Seg(p, new Vector2(-0.42f, 0), new Vector2(0.32f, 0), 0.08f),
             Mathf.Min(Seg(p, new Vector2(0.06f, 0.3f), new Vector2(0.38f, 0), 0.08f), Seg(p, new Vector2(0.06f, -0.3f), new Vector2(0.38f, 0), 0.08f)));
 
-        public static Sprite Picto(string g) => Icon(g, true);
-        public static Sprite Glyph(string g) => Icon(g, false); // same glyph, no tile: for round buttons and cards
+        public static Sprite Picto(string g) => ItemIcon(g) ?? Icon(g, true);
+        public static Sprite Glyph(string g) => ItemIcon(g) ?? Icon(g, false); // same glyph, no tile: for round buttons and cards
 
-        static Sprite Icon(string g, bool tile) => Make((tile ? "p_" : "g_") + g, 128, 128, 128, (p, px) =>
+        // Pickups are marked everywhere in the UI by the first frame of their own sheet, so the icon matches what you grab.
+        static Sprite ItemIcon(string g) => g switch
         {
+            "coin" => CoinFrames[0], "fuel" => FuelFrames[0], "shield" => ShieldFrames[0], "magnet" => MagnetFrames[0], "boost" => BoostFrames[0],
+            _ => null
+        };
+
+        // UI icons: the same shapes on a 24-texel grid with hard edges, point-filtered, to sit with the pixel-art sprites.
+        static Sprite Icon(string g, bool tile)
+        {
+            var s = IconArt(g, tile); s.texture.filterMode = FilterMode.Point; return s;
+        }
+
+        static Sprite IconArt(string g, bool tile) => Make((tile ? "p_" : "g_") + g, 24, 24, 24, (p, px) =>
+        {
+            px *= 0.02f; // no anti-aliasing: whole texels only
             Color asph = CDark, sig = CSig, inv = CBody;
             if (!tile) { p *= 0.72f; px *= 0.72f; } // glyph-only icons fill their box
             var o = new Px(tile ? asph : sig);
